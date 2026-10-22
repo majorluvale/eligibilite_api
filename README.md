@@ -33,7 +33,27 @@ KoboCollect ──soumission──▶ KoboToolbox ──REST Service (JSON)─�
 | `kobo/build_xlsform.py` | Génère le formulaire Kobo depuis `schema.py` |
 | `kobo/formulaire_ciblage_menages.xlsx` | **Formulaire à importer dans KoboToolbox** |
 | `scripts/simulate_kobo.py` | Envoie des ménages simulés au webhook (démo) |
-| `tests/` | Tests de l'API, du webhook, de la revue et de la cohérence formulaire ↔ modèle |
+| `tests/` | Tests de l'API, du webhook, de la revue, de la sélection et de la cohérence formulaire ↔ modèle |
+| `notebooks/` | Analyses v3, v4 et v5 : déséquilibre, données MSNA, grille de points d'une ONG et sélection sous budget (voir `notebooks/README.md`) |
+
+## Sélection sous contrainte budgétaire
+
+Quand il y a plus de ménages éligibles que le budget n'en permet (par exemple 10 000 éligibles et 3 000 places), la page **Sélection** du dashboard classe les éligibles et produit la liste.
+
+- **Score de priorité** : un **second modèle**, le modèle de priorité, apprend à prédire le **score que l'agent calculait avec sa grille Excel** (ici `Score_Vuln`). Les éligibles sont classés par ce score prédit.
+  - Sur les données v5 (grille avec exclusions et inclusions automatiques), il retrouve **96 %** de la liste qu'aurait produite l'agent pour un budget couvrant 30 % des éligibles, contre 83 à 85 % en classant avec le modèle de décision. Voir `notebooks/ciblage_avec_ml_v5.ipynb`.
+  - Si l'historique ne contient pas de score de l'agent, le classement se fait par repli sur l'indice du modèle de décision (`base + somme des contributions`).
+  - On ne classe **pas** par probabilité d'éligibilité : elle mesure la certitude du modèle, pas l'intensité des besoins, et elle sature à 1.
+- **Deux modes de répartition** :
+  - **globale** : les N ménages les plus prioritaires, toutes zones confondues ;
+  - **proportionnelle par zone** : chaque zone reçoit un quota proportionnel à son nombre d'éligibles (méthode du plus fort reste), puis on prend les plus prioritaires dans chaque zone.
+- **Option** : n'inclure que les ménages dont la décision a déjà été revue par un humain.
+- Chaque liste est un **instantané** enregistré : auteur, date, paramètres, version du modèle. Elle affiche :
+  - la couverture par zone ;
+  - les ménages **juste sous la ligne de coupure** (à examiner en cas de contestation ou de place libérée) ;
+  - un signal si un ménage retenu a été déclaré non éligible après la création de la liste.
+- Export CSV pour la distribution : rang, ménage, téléphone, village, zone, indice, principaux facteurs.
+- En cas d'égalité, le ménage enquêté le plus tôt passe d'abord.
 
 ## Le modèle
 
@@ -52,7 +72,7 @@ Voir `../ciblage_avec_ml_v3_desequilibre.ipynb` pour l'analyse complète. Résum
 - **Zone grise** : les ménages dont le score est à ±0,30 du seuil (≈ 6 % des ménages, ≈ 43 % des erreurs) sont signalés « à vérifier en priorité ».
 - **Explication** : `logit(score) = valeur de base + Σ contributions`. Chaque contribution est regroupée par question du formulaire. Pour la régression logistique elle est exacte (coef × écart à la moyenne) ; pour LightGBM ce sont des valeurs TreeSHAP natives.
 
-Ré-entraîner :
+Ré-entraîner (modèle de décision, plus modèle de priorité si la colonne `Score_Vuln` du score de l'agent est présente) :
 
 ```bash
 python -m training.train --data ../dataset_humanitaire_complexe_100k.csv
@@ -115,6 +135,8 @@ Limite du plan gratuit : le service s'endort après 15 minutes sans trafic, et l
 | GET | `/api/beneficiaires/{id}` | Basic | Détail : réponses, explication, historique des revues |
 | POST | `/api/beneficiaires/{id}/revision` | Basic | `{"approuve": false, "commentaire": "..."}` |
 | POST | `/api/kobo/sync` | Basic | Import des soumissions via l'API Kobo |
+| POST | `/api/selections` | Basic | `{"nombre": 3000, "repartition": "globale" \| "proportionnelle_zone", "inclure_non_revus": true, "nom": "..."}` |
+| GET | `/api/selections/{id}` | Basic | Liste retenue, classée par indice de priorité |
 | GET | `/health` | — | Supervision |
 
 ## Pistes suivantes

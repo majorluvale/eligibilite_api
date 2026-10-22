@@ -71,6 +71,42 @@ class Review(Base):
     beneficiary: Mapped[Beneficiary] = relationship(back_populates="reviews")
 
 
+class Selection(Base):
+    """Liste de ménages retenus quand le budget ne couvre pas tous les éligibles (instantané daté)."""
+    __tablename__ = "selections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    nom: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_by: Mapped[str] = mapped_column(String(100))
+    nb_demande: Mapped[int] = mapped_column(Integer)
+    nb_eligibles: Mapped[int] = mapped_column(Integer)
+    nb_retenus: Mapped[int] = mapped_column(Integer)
+    repartition: Mapped[str] = mapped_column(String(30))  # "globale" | "proportionnelle_zone"
+    inclure_non_revus: Mapped[bool] = mapped_column(Boolean)
+    model_version: Mapped[str] = mapped_column(String(50))
+    methode_priorite: Mapped[str] = mapped_column(String(20))  # "score_predit" | "log_odds"
+
+    items: Mapped[list["SelectionItem"]] = relationship(
+        back_populates="selection", order_by="SelectionItem.rang", cascade="all, delete-orphan")
+
+
+class SelectionItem(Base):
+    """Un ménage éligible classé dans une sélection, retenu ou non."""
+    __tablename__ = "selection_menages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    selection_id: Mapped[int] = mapped_column(ForeignKey("selections.id"), index=True)
+    beneficiary_id: Mapped[int] = mapped_column(ForeignKey("beneficiaires.id"))
+    rang: Mapped[int] = mapped_column(Integer)  # rang de priorité dans sa zone (proportionnelle) ou global
+    priorite: Mapped[float] = mapped_column(Float)
+    zone: Mapped[str] = mapped_column(String(100))
+    retenu: Mapped[bool] = mapped_column(Boolean)
+
+    selection: Mapped[Selection] = relationship(back_populates="items")
+    beneficiary: Mapped[Beneficiary] = relationship()
+
+
 _engine = None
 SessionLocal = sessionmaker(expire_on_commit=False)
 

@@ -10,7 +10,9 @@
 <header class="topbar">
   <a class="brand" href="/dashboard">Ciblage<span>·</span>Éligibilité</a>
   <nav>
-    <a href="/dashboard" class="{% if request.url.path.startswith('/dashboard') and not request.url.path.startswith('/dashboard/modele') %}active{% endif %}">Bénéficiaires</a>
+    {% set p = request.url.path %}
+    <a href="/dashboard" class="{% if p.startswith('/dashboard') and not p.startswith('/dashboard/modele') and not p.startswith('/dashboard/selections') %}active{% endif %}">Bénéficiaires</a>
+    <a href="/dashboard/selections" class="{% if p.startswith('/dashboard/selections') %}active{% endif %}">Sélection</a>
     <a href="/dashboard/modele" class="{% if request.url.path.startswith('/dashboard/modele') %}active{% endif %}">Modèle</a>
     <a href="/docs">API</a>
   </nav>

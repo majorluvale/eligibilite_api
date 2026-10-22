@@ -1,5 +1,5 @@
 {
-  "version": "20261021200642",
+  "version": "20261022123431",
   "modele": "regression_logistique_ponderee",
   "seuil": 0.45,
   "beta": 2.0,
@@ -109,6 +109,14 @@
     "Nombre_Repas_Jour",
     "Dette_Contractee_Crise"
   ],
+  "priorite": {
+    "methode": "score_predit",
+    "cible": "Score_Vuln",
+    "erreur_moyenne_points": 0.102,
+    "spearman": 0.9971,
+    "recouvrement_top30_score_predit": 0.9707,
+    "recouvrement_top30_log_odds": 0.9691
+  },
   "importance_globale": [
     {
       "feature": "Statut_Menage",

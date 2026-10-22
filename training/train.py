@@ -26,7 +26,8 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-from lightgbm import LGBMClassifier
+from lightgbm import LGBMClassifier, LGBMRegressor
+from scipy.stats import spearmanr
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (average_precision_score, balanced_accuracy_score, confusion_matrix,
@@ -44,6 +45,8 @@ from app.schema import CATEGORICAL, FEATURE_NAMES, NUMERIC  # noqa: E402
 
 TARGET = "Eligible"
 LEAKY = ["Score_Vuln", "Assistance_Recommandee"]
+# score calculé par l'agent avec sa grille (Excel) : jamais une variable d'entrée, mais la cible du modèle de priorité
+PRIORITY_TARGET = "Score_Vuln"
 SEED = 42
 
 
@@ -97,7 +100,21 @@ def load_data(path: Path) -> tuple[pd.DataFrame, np.ndarray]:
     df = pd.read_csv(path, encoding="utf-8-sig")
     y = df[TARGET].to_numpy()
     X = df.drop(columns=[TARGET] + [c for c in LEAKY if c in df])[FEATURE_NAMES]
+    X.attrs["score_agent"] = df[PRIORITY_TARGET].to_numpy() if PRIORITY_TARGET in df else None
     return X, y
+
+
+def priority_model(X_tr, s_tr) -> Pipeline:
+    """Apprend le score de l'agent : sert à classer les éligibles quand le budget est limité."""
+    return Pipeline(preprocessor(False) + [
+        ("reg", LGBMRegressor(n_estimators=800, learning_rate=0.05, num_leaves=31, random_state=SEED, verbose=-1))
+    ]).fit(X_tr, s_tr)
+
+
+def overlap_top(priority, reference, share=0.30) -> float:
+    """Part de la liste de référence (top `share` selon le score de l'agent) retrouvée par un autre classement."""
+    n = max(1, int(len(reference) * share))
+    return len(set(np.argsort(-priority, kind="stable")[:n]) & set(np.argsort(-reference, kind="stable")[:n])) / n
 
 
 def split(X, y):
@@ -116,6 +133,7 @@ def main(argv=None) -> dict:
     args = ap.parse_args(argv)
 
     X, y = load_data(Path(args.data))
+    score_agent = X.attrs.get("score_agent")
     X_tr, X_va, X_te, y_tr, y_va, y_te = split(X, y)
     print(f"Données : {len(X)} ménages, {y.mean():.1%} éligibles | train {len(X_tr)} / val {len(X_va)} / test {len(X_te)}")
 
@@ -164,6 +182,26 @@ def main(argv=None) -> dict:
         "variables": FEATURE_NAMES,
     }
     artifact = {"pipeline": pipe, "threshold": thr, "background_mean": background_mean, "metadata": metadata}
+
+    # modèle de priorité : seulement si l'historique contient le score de l'agent
+    if score_agent is not None:
+        s = pd.Series(score_agent, index=X.index)
+        reg = priority_model(X_tr, s.loc[X_tr.index])
+        artifact["priority_pipeline"] = reg
+        elig = X_te[y_te == 1]
+        s_ref = s.loc[elig.index].to_numpy()
+        s_pred = reg.predict(elig)
+        contrib, base = EligibilityModel(artifact).contributions(elig)
+        metadata["priorite"] = {
+            "methode": "score_predit", "cible": PRIORITY_TARGET,
+            "erreur_moyenne_points": round(float(np.abs(s_pred - s_ref).mean()), 3),
+            "spearman": round(float(spearmanr(s_pred, s_ref).correlation), 4),
+            "recouvrement_top30_score_predit": round(overlap_top(s_pred, s_ref), 4),
+            "recouvrement_top30_log_odds": round(overlap_top(base + contrib.sum(axis=1), s_ref), 4),
+        }
+        print(f"  Priorité : {json.dumps(metadata['priorite'], ensure_ascii=False)}")
+    else:
+        metadata["priorite"] = {"methode": "log_odds"}
 
     # importance globale = moyenne des |contributions| sur le jeu de test
     contrib, _ = EligibilityModel(artifact).contributions(X_te)

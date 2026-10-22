@@ -62,6 +62,22 @@
   </div>
 </section>
 
+{% if m.priorite and m.priorite.methode == 'score_predit' %}
+<section class="card">
+  <h2>Modèle de priorité (sélection sous budget)</h2>
+  <p class="small">Un second modèle apprend le score que l'agent calculait avec sa grille (<code>{{ m.priorite.cible }}</code>).
+    Il sert à classer les ménages éligibles quand le budget ne permet pas de tous les servir.</p>
+  <table class="list compact">
+    <tbody>
+      <tr><td>Erreur moyenne sur le score (test)</td><td class="num">{{ '%.2f'|format(m.priorite.erreur_moyenne_points) }} point</td></tr>
+      <tr><td>Corrélation de rang avec le score de l'agent (Spearman)</td><td class="num">{{ '%.3f'|format(m.priorite.spearman) }}</td></tr>
+      <tr><td>Liste de l'agent retrouvée — budget de 30 % des éligibles, classement par score prédit</td><td class="num"><strong>{{ m.priorite.recouvrement_top30_score_predit|pct }}</strong></td></tr>
+      <tr><td>Même chose en classant par l'indice du modèle de décision</td><td class="num">{{ m.priorite.recouvrement_top30_log_odds|pct }}</td></tr>
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
 <section class="card">
   <h2>Importance globale des critères</h2>
   <p class="muted small">Effet moyen (|contribution|) de chaque question sur la décision, mesuré sur le jeu de test.</p>

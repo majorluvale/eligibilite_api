@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ sel.nom }} — Ciblage{% endblock %}
+{% block content %}
+{% set lib = "Score prédit" if sel.methode_priorite == "score_predit" else "Indice" %}
+<a class="back" href="/dashboard/selections">← Toutes les sélections</a>
+<div class="page-head">
+  <div>
+    <h1>{{ sel.nom }}</h1>
+    <p class="muted">Créée par {{ sel.created_by }} le {{ sel.created_at.strftime('%d/%m/%Y à %H:%M') }}
+      · {{ 'répartition proportionnelle par zone' if sel.repartition == 'proportionnelle_zone' else 'les plus prioritaires, toutes zones confondues' }}
+      · {{ 'ménages non revus inclus' if sel.inclure_non_revus else 'ménages revus uniquement' }} · classement : {{ "score de l'agent prédit (points)" if sel.methode_priorite == "score_predit" else "indice du modèle de décision" }} · modèle {{ sel.model_version }}</p>
+  </div>
+  <div class="actions"><a class="btn" href="/dashboard/selections/{{ sel.id }}/export.csv">Exporter la liste (CSV)</a></div>
+</div>
+
+<section class="kpis">
+  <div class="kpi"><span>Ménages retenus</span><strong>{{ sel.nb_retenus }}</strong><small>demandés : {{ sel.nb_demande }}</small></div>
+  <div class="kpi"><span>Ménages éligibles</span><strong>{{ sel.nb_eligibles }}</strong></div>
+  <div class="kpi"><span>Couverture des éligibles</span><strong>{{ (sel.nb_retenus / sel.nb_eligibles)|pct }}</strong></div>
+  <div class="kpi"><span>Éligibles non retenus</span><strong>{{ sel.nb_eligibles - sel.nb_retenus }}</strong><small>faute de budget</small></div>
+  {% if resume.seuil_global is not none %}
+  <div class="kpi"><span>{{ lib }} du dernier retenu</span><strong>{{ '%.2f'|format(resume.seuil_global) }}</strong></div>
+  {% endif %}
+</section>
+
+<section class="two-col">
+  <div class="card">
+    <h2>Couverture par zone</h2>
+    <table class="list compact">
+      <thead><tr><th>Zone</th><th class="num">Éligibles</th><th class="num">Retenus</th><th class="num">Couverture</th><th class="num">{{ lib }} min. retenu</th></tr></thead>
+      <tbody>
+      {% for zone, z in resume.zones.items() %}
+        <tr><td>{{ zone }}</td><td class="num">{{ z.eligibles }}</td><td class="num">{{ z.retenus }}</td>
+          <td class="num">{{ (z.retenus / z.eligibles)|pct }}</td>
+          <td class="num">{{ '%.2f'|format(z.seuil) if z.seuil is not none else '—' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="small muted">En répartition globale, une zone très touchée peut recevoir une part plus que proportionnelle :
+      c'est voulu si le budget doit aller aux besoins les plus aigus. La répartition par zone garantit à l'inverse une couverture géographique équilibrée.</p>
+  </div>
+
+  <div class="card">
+    <h2>Juste sous la ligne de coupure</h2>
+    <p class="small">{% if par_zone %}Les premiers ménages éligibles <strong>non</strong> retenus de chaque zone, ceux qui entreraient si le quota de leur zone augmentait.
+      {% else %}Les ménages éligibles les plus prioritaires parmi ceux qui ne sont <strong>pas</strong> retenus.{% endif %}
+      À examiner en premier si des places se libèrent ou si une décision est contestée.</p>
+    <table class="list compact">
+      <thead><tr><th>Ménage</th><th>Zone</th>{% if par_zone %}<th class="num">Rang zone</th>{% endif %}<th class="num">{{ lib }}</th></tr></thead>
+      <tbody>
+      {% for i in sous_la_ligne %}
+        <tr><td><a href="/dashboard/beneficiaires/{{ i.beneficiary_id }}">{{ i.beneficiary.nom_chef_menage or ('Ménage #' ~ i.beneficiary_id) }}</a></td>
+          <td>{{ i.zone }}</td>{% if par_zone %}<td class="num">{{ i.rang }}</td>{% endif %}<td class="num">{{ '%.2f'|format(i.priorite) }}</td></tr>
+      {% else %}
+        <tr><td colspan="4" class="muted">Tous les éligibles sont retenus.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<h2 class="mt">Ménages retenus</h2>
+<div class="table-scroll">
+<table class="list">
+  <thead><tr><th class="num">Rang</th>{% if par_zone %}<th class="num">Rang zone</th>{% endif %}<th>Chef de ménage</th><th>Village</th><th>Zone</th><th class="num">{{ lib }}</th><th>Principaux facteurs</th><th>Revue</th></tr></thead>
+  <tbody>
+  {% for i in retenus %}
+    {% set b = i.beneficiary %}
+    <tr onclick="location.href='/dashboard/beneficiaires/{{ b.id }}'">
+      <td class="num">{{ loop.index }}</td>{% if par_zone %}<td class="num">{{ i.rang }}</td>{% endif %}
+      <td><a href="/dashboard/beneficiaires/{{ b.id }}">{{ b.nom_chef_menage or ('Ménage #' ~ b.id) }}</a>
+        {% if not b.final_decision %}<span class="tag warn" title="Décision passée à « non éligible » après la création de la liste">plus éligible</span>{% endif %}</td>
+      <td>{{ b.village or '—' }}</td>
+      <td>{{ i.zone }}</td>
+      <td class="num">{{ '%.2f'|format(i.priorite) }}</td>
+      {% set top = (b.explanation|selectattr('contribution', 'gt', 0)|list)[:2] %}
+      <td class="small">{% for e in top %}{{ e.label }} : {{ e.value }}{% if not loop.last %} · {% endif %}{% endfor %}</td>
+      <td>{% if b.statut_revue == 'en_attente' %}<span class="tag">en attente</span>{% elif b.statut_revue == 'confirmee' %}<span class="tag ok">confirmée</span>{% else %}<span class="tag alt">modifiée</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

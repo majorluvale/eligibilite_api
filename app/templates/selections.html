@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Sélection — Ciblage{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Sélection sous contrainte budgétaire</h1>
+    <p class="muted">Quand le budget ne couvre pas tous les ménages éligibles, le modèle les classe par indice de priorité
+      et retient les plus vulnérables.</p>
+  </div>
+</div>
+
+{% if err %}<div class="flash error">{{ err }}</div>{% endif %}
+
+<section class="two-col">
+  <div class="card">
+    <h2>Nouvelle sélection</h2>
+    <p class="small">{{ eligibles }} ménages éligibles actuellement{% if non_revus %}, dont {{ non_revus }} pas encore revus{% endif %}.</p>
+    <form method="post" action="/dashboard/selections" class="review">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label class="field">Nom de la liste
+        <input class="input" type="text" name="nom" placeholder="Ex. Distribution cash — novembre 2026">
+      </label>
+      <label class="field">Nombre de ménages que le budget permet d'assister
+        <input class="input" type="number" name="nombre" min="1" required placeholder="Ex. 3000">
+      </label>
+      <label class="choice">
+        <input type="radio" name="repartition" value="globale" checked>
+        <span><strong>Les plus prioritaires, toutes zones confondues</strong>
+          <small>Le budget va aux ménages qui ont l'indice de priorité le plus élevé, où qu'ils soient.</small></span>
+      </label>
+      <label class="choice">
+        <input type="radio" name="repartition" value="proportionnelle_zone">
+        <span><strong>Répartition proportionnelle par zone</strong>
+          <small>Chaque zone reçoit un quota proportionnel à son nombre d'éligibles, puis on prend les plus prioritaires dans chaque zone.</small></span>
+      </label>
+      <label class="check"><input type="checkbox" name="inclure_non_revus" value="1" checked>
+        Inclure les ménages dont la décision n'a pas encore été revue</label>
+      <button class="btn">Classer et sélectionner</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Comment le classement est fait</h2>
+    {% if methode == 'score_predit' %}
+    <p class="small">Un <strong>modèle de priorité</strong> a appris, à partir des listes passées, à prédire le <strong>score que l'agent
+      calculait avec sa grille</strong> (les points de la feuille Excel). Les éligibles sont classés par ce score prédit,
+      du plus vulnérable au moins vulnérable.{% if prio.recouvrement_top30_score_predit %} Sur les données de test, il retrouve
+      <strong>{{ prio.recouvrement_top30_score_predit|pct }}</strong> de la liste que l'agent aurait produite pour un budget couvrant 30 % des éligibles
+      (contre {{ prio.recouvrement_top30_log_odds|pct }} en classant par le modèle de décision).{% endif %}</p>
+    {% else %}
+    <p class="small">Le modèle n'a pas été entraîné avec le score historique de l'agent. Les éligibles sont classés par
+      l'<strong>indice du modèle de décision</strong> (la somme des effets de chaque critère, comme dans « Pourquoi le modèle a décidé ainsi »).
+      Pour un classement plus fidèle, entraînez le modèle avec une colonne de score de l'agent.</p>
+    {% endif %}
+    <p class="small">On ne classe pas par probabilité d'éligibilité : elle mesure la <em>certitude</em> du modèle, pas
+      l'<em>intensité des besoins</em>, et elle vaut presque 1 pour beaucoup de ménages.</p>
+    <p class="small muted">Ex aequo : le ménage enquêté le plus tôt passe d'abord. Chaque liste est un instantané daté, avec la version du modèle :
+      les revues faites après sa création ne la modifient pas.</p>
+  </div>
+</section>
+
+<h2 class="mt">Listes déjà produites</h2>
+<div class="table-scroll">
+<table class="list">
+  <thead><tr><th>Liste</th><th>Date</th><th>Par</th><th class="num">Retenus</th><th class="num">Éligibles</th><th class="num">Couverture</th><th>Répartition</th></tr></thead>
+  <tbody>
+  {% for s in historique %}
+    <tr onclick="location.href='/dashboard/selections/{{ s.id }}'">
+      <td><a href="/dashboard/selections/{{ s.id }}">{{ s.nom }}</a></td>
+      <td>{{ s.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+      <td>{{ s.created_by }}</td>
+      <td class="num">{{ s.nb_retenus }}</td>
+      <td class="num">{{ s.nb_eligibles }}</td>
+      <td class="num">{{ (s.nb_retenus / s.nb_eligibles)|pct }}</td>
+      <td>{{ 'par zone' if s.repartition == 'proportionnelle_zone' else 'globale' }}</td>
+    </tr>
+  {% else %}
+    <tr class="empty"><td colspan="7">Aucune sélection pour l'instant.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

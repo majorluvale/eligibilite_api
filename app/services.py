@@ -1,12 +1,13 @@
 """Logique métier : évaluer une soumission, enregistrer une revue humaine, statistiques."""
 from __future__ import annotations
 
+import pandas as pd
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import kobo
 from .config import get_settings
-from .db import Beneficiary, Review, utcnow
+from .db import Beneficiary, Review, Selection, SelectionItem, utcnow
 from .ml import load_model
 from .schema import normalize_features
 
@@ -79,6 +80,92 @@ def apply_review(session: Session, ben: Beneficiary, reviewer: str, approuve: bo
     ben.reviewed_at = utcnow()
     session.commit()
     return review
+
+
+def priorites(menages: list[Beneficiary]) -> tuple[list[float], str]:
+    """Indice de priorité de chaque ménage, calculé en un seul passage par le modèle.
+
+    Méthode principale : le score de l'agent (points de sa grille Excel) prédit par le modèle de
+    priorité. On ne classe pas par probabilité d'éligibilité : elle mesure la certitude du modèle,
+    pas l'intensité des besoins, et vaut presque 1 pour beaucoup de ménages.
+    """
+    model = load_model(get_settings().model_dir)
+    valeurs = model.priorities(pd.DataFrame([b.features for b in menages]))
+    return [float(v) for v in valeurs], model.priority_method
+
+
+def repartir(n: int, effectifs: dict[str, int]) -> dict[str, int]:
+    """Quotas proportionnels au nombre d'éligibles par zone (méthode du plus fort reste)."""
+    total = sum(effectifs.values())
+    if n >= total:
+        return dict(effectifs)
+    exacts = {z: n * c / total for z, c in effectifs.items()}
+    quotas = {z: int(q) for z, q in exacts.items()}
+    reste = n - sum(quotas.values())
+    for z in sorted(exacts, key=lambda z: exacts[z] - quotas[z], reverse=True)[:reste]:
+        quotas[z] += 1
+    return quotas
+
+
+def creer_selection(session: Session, nom: str, nb: int, repartition: str, inclure_non_revus: bool,
+                    auteur: str) -> Selection:
+    """Classe les ménages éligibles par indice de priorité et retient les `nb` premiers.
+
+    - repartition="globale" : les `nb` ménages les plus prioritaires, toutes zones confondues ;
+    - repartition="proportionnelle_zone" : chaque zone reçoit un quota proportionnel à son
+      nombre d'éligibles, puis on prend les plus prioritaires dans chaque zone.
+    Ex aequo : le ménage enquêté le plus tôt passe d'abord.
+    """
+    if nb < 1:
+        raise ValueError("Le nombre de ménages à sélectionner doit être au moins 1.")
+    if repartition not in ("globale", "proportionnelle_zone"):
+        raise ValueError("Répartition inconnue.")
+    query = select(Beneficiary).where(Beneficiary.final_decision.is_(True))
+    if not inclure_non_revus:
+        query = query.where(Beneficiary.statut_revue != "en_attente")
+    eligibles = session.scalars(query).all()
+    if not eligibles:
+        raise ValueError("Aucun ménage éligible ne correspond à ces critères.")
+
+    valeurs, methode = priorites(eligibles)
+    prio = {b.id: v for b, v in zip(eligibles, valeurs)}
+    ordre = sorted(eligibles, key=lambda b: (-prio[b.id], b.submitted_at or b.received_at, b.id))
+
+    items = []
+    if repartition == "globale":
+        for rang, b in enumerate(ordre, 1):
+            items.append(SelectionItem(beneficiary=b, rang=rang, priorite=prio[b.id],
+                                       zone=b.features["Location"], retenu=rang <= nb))
+    else:
+        par_zone: dict[str, list[Beneficiary]] = {}
+        for b in ordre:
+            par_zone.setdefault(b.features["Location"], []).append(b)
+        quotas = repartir(nb, {z: len(m) for z, m in par_zone.items()})
+        for zone, menages in par_zone.items():
+            for rang, b in enumerate(menages, 1):
+                items.append(SelectionItem(beneficiary=b, rang=rang, priorite=prio[b.id], zone=zone,
+                                           retenu=rang <= quotas[zone]))
+
+    sel = Selection(nom=nom.strip() or f"Sélection de {nb} ménages", created_by=auteur, nb_demande=nb,
+                    nb_eligibles=len(eligibles), nb_retenus=sum(i.retenu for i in items), repartition=repartition,
+                    inclure_non_revus=inclure_non_revus, model_version=load_model(get_settings().model_dir).version,
+                    methode_priorite=methode, items=items)
+    session.add(sel)
+    session.commit()
+    return sel
+
+
+def resume_selection(sel: Selection) -> dict:
+    """Couverture par zone et seuil de priorité de la dernière place retenue."""
+    zones: dict[str, dict] = {}
+    for it in sel.items:
+        z = zones.setdefault(it.zone, {"eligibles": 0, "retenus": 0, "seuil": None})
+        z["eligibles"] += 1
+        if it.retenu:
+            z["retenus"] += 1
+            z["seuil"] = it.priorite if z["seuil"] is None else min(z["seuil"], it.priorite)
+    retenus = [i.priorite for i in sel.items if i.retenu]
+    return {"zones": dict(sorted(zones.items())), "seuil_global": min(retenus) if retenus else None}
 
 
 def stats(session: Session) -> dict:

@@ -44,6 +44,8 @@ class EligibilityModel:
         self.threshold = float(artifact["threshold"])
         self.background_mean = artifact.get("background_mean")
         self.metadata = artifact["metadata"]
+        # modèle de priorité (score de l'agent prédit) ; absent si l'historique n'avait pas de score
+        self.priority_pipeline = artifact.get("priority_pipeline")
         self.clf = self.pipeline.steps[-1][1]
         self.preprocess = self.pipeline[:-1]
         names = self.pipeline.named_steps["pre"].get_feature_names_out()
@@ -71,6 +73,21 @@ class EligibilityModel:
             raw = self.clf.predict_proba(z, pred_contrib=True)
             contrib, base = raw[:, :-1], raw[:, -1]
         return contrib @ self.agg, base
+
+    @property
+    def priority_method(self) -> str:
+        return "score_predit" if self.priority_pipeline is not None else "log_odds"
+
+    def priorities(self, df: pd.DataFrame) -> np.ndarray:
+        """Indice de priorité pour classer les éligibles sous contrainte budgétaire.
+
+        - score_predit : score de l'agent (points de sa grille) prédit par le modèle de priorité ;
+        - log_odds (repli) : base + somme des contributions du modèle de décision.
+        """
+        if self.priority_pipeline is not None:
+            return self.priority_pipeline.predict(df[FEATURE_NAMES])
+        contrib, base = self.contributions(df)
+        return base + contrib.sum(axis=1)
 
     def predict(self, features: dict, review_band: float | None = None) -> dict:
         if review_band is None:
@@ -100,6 +117,8 @@ class EligibilityModel:
             "explanation": explanation,
             "summary": summarize(explanation, eligible),
             "model_version": self.version,
+            "indice_priorite": round(float(self.priorities(df)[0]), 4),
+            "methode_priorite": self.priority_method,
         }
 
 

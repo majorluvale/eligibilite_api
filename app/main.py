@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from . import kobo, services
 from .config import get_settings
-from .db import Beneficiary, get_session, init_db
+from .db import Beneficiary, Selection, get_session, init_db
 from .ml import load_metadata, load_model
 from .schema import FEATURES, IDENTITY_FIELDS, SHORT_LABELS, ValidationError, normalize_features
 from .security import check_csrf, check_webhook_token, csrf_token, current_user
@@ -85,6 +85,8 @@ class PredictionOut(BaseModel):
     explanation: list[dict]
     summary: str
     model_version: str
+    indice_priorite: float
+    methode_priorite: str
 
 
 @app.post("/api/predict", tags=["modèle"], response_model=PredictionOut)
@@ -267,6 +269,117 @@ def export_csv(session: Session = Depends(get_session), user: str = Depends(curr
                     last or "", b.model_version])
     return StreamingResponse(iter(["﻿" + buf.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=beneficiaires.csv"})
+
+
+# ------------------------------------------------- Sélection sous contrainte budgétaire
+
+class SelectionIn(BaseModel):
+    nombre: int
+    nom: str = ""
+    repartition: str = "globale"  # ou "proportionnelle_zone"
+    inclure_non_revus: bool = True
+
+
+def serialize_selection(sel: Selection, details: bool = True) -> dict:
+    data = {"id": sel.id, "nom": sel.nom, "date": sel.created_at.isoformat(), "auteur": sel.created_by,
+            "nombre_demande": sel.nb_demande, "eligibles": sel.nb_eligibles, "retenus": sel.nb_retenus,
+            "repartition": sel.repartition, "inclure_non_revus": sel.inclure_non_revus, "model_version": sel.model_version,
+            "methode_priorite": sel.methode_priorite}
+    if details:
+        retenus = sorted((i for i in sel.items if i.retenu), key=lambda i: -i.priorite)
+        data["menages_retenus"] = [{"rang": n, "rang_dans_la_zone": i.rang if sel.repartition == "proportionnelle_zone" else None,
+                                    "id": i.beneficiary_id, "kobo_key": i.beneficiary.kobo_key,
+                                    "nom_chef_menage": i.beneficiary.nom_chef_menage, "zone": i.zone,
+                                    "indice_priorite": round(i.priorite, 3)} for n, i in enumerate(retenus, 1)]
+    return data
+
+
+@app.post("/api/selections", tags=["sélection"])
+def api_create_selection(body: SelectionIn, session: Session = Depends(get_session), user: str = Depends(current_user)):
+    try:
+        sel = services.creer_selection(session, body.nom, body.nombre, body.repartition, body.inclure_non_revus, user)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    return serialize_selection(sel)
+
+
+@app.get("/api/selections/{sel_id}", tags=["sélection"])
+def api_get_selection(sel_id: int, session: Session = Depends(get_session), user: str = Depends(current_user)):
+    return serialize_selection(get_selection_or_404(session, sel_id))
+
+
+def get_selection_or_404(session: Session, sel_id: int) -> Selection:
+    sel = session.get(Selection, sel_id)
+    if not sel:
+        raise HTTPException(404, "Sélection introuvable")
+    return sel
+
+
+@app.get("/dashboard/selections", response_class=HTMLResponse, include_in_schema=False)
+def selections_page(request: Request, err: str | None = None, session: Session = Depends(get_session),
+                    user: str = Depends(current_user)):
+    s = services.stats(session)
+    non_revus = session.scalar(select(func.count(Beneficiary.id)).where(
+        Beneficiary.final_decision.is_(True), Beneficiary.statut_revue == "en_attente")) or 0
+    historique = session.scalars(select(Selection).order_by(Selection.created_at.desc()).limit(50)).all()
+    model = load_model(get_settings().model_dir)
+    return templates.TemplateResponse(request, "selections.html", {
+        "user": user, "csrf": csrf_token(user), "eligibles": s["eligibles_final"], "non_revus": non_revus,
+        "historique": historique, "err": err, "methode": model.priority_method,
+        "prio": model.metadata.get("priorite", {})})
+
+
+@app.post("/dashboard/selections", include_in_schema=False)
+def selections_create(nombre: int = Form(...), nom: str = Form(""), repartition: str = Form("globale"),
+                      inclure_non_revus: str | None = Form(None), csrf: str = Form(""),
+                      session: Session = Depends(get_session), user: str = Depends(current_user)):
+    check_csrf(user, csrf)
+    try:
+        sel = services.creer_selection(session, nom, nombre, repartition, inclure_non_revus is not None, user)
+    except ValueError as e:
+        return RedirectResponse(f"/dashboard/selections?{urlencode({'err': str(e)})}", status_code=303)
+    return RedirectResponse(f"/dashboard/selections/{sel.id}", status_code=303)
+
+
+@app.get("/dashboard/selections/{sel_id}", response_class=HTMLResponse, include_in_schema=False)
+def selection_page(request: Request, sel_id: int, session: Session = Depends(get_session),
+                   user: str = Depends(current_user)):
+    sel = get_selection_or_404(session, sel_id)
+    retenus = sorted((i for i in sel.items if i.retenu), key=lambda i: -i.priorite)
+    # ménages éligibles juste sous la ligne de coupure : ceux qu'un superviseur doit regarder en premier.
+    # Par zone, ce sont les premiers non retenus de chaque zone (rang dans la zone), pas les plus forts indices globaux.
+    par_zone = sel.repartition == "proportionnelle_zone"
+    non_retenus = sorted((i for i in sel.items if not i.retenu), key=lambda i: -i.priorite)
+    if par_zone:  # les 3 premiers non retenus de chaque zone
+        sous_la_ligne, vus = [], {}
+        for i in non_retenus:
+            vus[i.zone] = vus.get(i.zone, 0) + 1
+            if vus[i.zone] <= 3:
+                sous_la_ligne.append(i)
+        sous_la_ligne.sort(key=lambda i: (i.zone, i.rang))
+    else:
+        sous_la_ligne = non_retenus[:20]
+    return templates.TemplateResponse(request, "selection.html", {
+        "user": user, "sel": sel, "resume": services.resume_selection(sel), "retenus": retenus,
+        "sous_la_ligne": sous_la_ligne, "par_zone": par_zone})
+
+
+@app.get("/dashboard/selections/{sel_id}/export.csv", include_in_schema=False)
+def selection_export(sel_id: int, session: Session = Depends(get_session), user: str = Depends(current_user)):
+    sel = get_selection_or_404(session, sel_id)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["rang", "rang_dans_la_zone", "id", "kobo_key", "nom_chef_menage", "telephone", "village", "zone",
+                "indice_priorite", "score_eligibilite", "statut_revue", "decision_finale_actuelle", "principaux_facteurs"])
+    retenus = sorted((i for i in sel.items if i.retenu), key=lambda i: -i.priorite)
+    for rang, i in enumerate(retenus, 1):
+        b = i.beneficiary
+        facteurs = "; ".join(f"{e['label']} = {e['value']}" for e in b.explanation if e["contribution"] > 0)
+        w.writerow([rang, i.rang if sel.repartition == "proportionnelle_zone" else "", b.id, b.kobo_key, b.nom_chef_menage or "", b.telephone or "", b.village or "", i.zone,
+                    round(i.priorite, 3), b.score, b.statut_revue, int(b.final_decision), facteurs])
+    nom_fichier = f"selection_{sel.id}.csv"
+    return StreamingResponse(iter(["﻿" + buf.getvalue()]), media_type="text/csv",
+                             headers={"Content-Disposition": f"attachment; filename={nom_fichier}"})
 
 
 @app.exception_handler(ValidationError)
