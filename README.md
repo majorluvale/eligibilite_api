@@ -3,20 +3,22 @@
 Backend FastAPI qui :
 
 1. **reçoit une copie de chaque soumission KoboToolbox** (REST Service / webhook) ;
-2. **prédit si le ménage est éligible** avec le modèle entraîné (classes déséquilibrées : 13,7 % d'éligibles) ;
-3. **explique la décision** : contribution de chaque critère, dans un dashboard ;
-4. permet à un·e superviseur·e de **voir les données du ménage et la décision, puis de l'approuver ou de la désapprouver**. Un commentaire est obligatoire en cas de désaccord, et chaque revue est historisée.
+2. **reproduit la décision de l'agent de ciblage** : il estime le score de la grille de l'ONG (en points), puis décide si le ménage est éligible, exceptions de la grille comprises ;
+3. **explique la décision** : points apportés par chaque critère, comme une ligne de la feuille Excel de l'agent ;
+4. permet à un·e superviseur·e de **voir les données du ménage et la décision, puis de l'approuver ou de la désapprouver**. Un commentaire est obligatoire en cas de désaccord, et chaque revue est historisée ;
+5. **sélectionne les ménages à servir quand le budget est limité**, par score estimé, au global ou par zone.
 
 ```
 KoboCollect ──soumission──▶ KoboToolbox ──REST Service (JSON)──▶ POST /api/kobo/webhook
                                                                      │
-                                       schema.py : codes Kobo → variables du modèle
-                                       modèle    : score + seuil + contributions
+                                       schema.py : questions du formulaire = variables du modèle
+                                       modèles   : score en points + décision + explication
                                                                      ▼
                                      base de données (SQLite / Postgres) ──▶ /dashboard
                                                                                ├─ liste, filtres, zone grise
                                                                                ├─ fiche ménage + explication
                                                                                ├─ approuver / désapprouver
+                                                                               ├─ sélection sous budget
                                                                                └─ export CSV
 ```
 
@@ -24,11 +26,10 @@ KoboCollect ──soumission──▶ KoboToolbox ──REST Service (JSON)─�
 
 | Chemin | Rôle |
 |---|---|
-| `app/schema.py` | **Source unique** des questions : nom Kobo, libellé, codes des choix, valeur d'entraînement |
-| `app/features.py` | Indicateurs de vulnérabilité IFRC dérivés des réponses (chef mineur, chef de plus de 60 ans, 8 personnes ou plus, 1 repas par jour) |
-| `app/ml.py` | Chargement du modèle, prédiction, explication additive (exacte) |
+| `app/schema.py` | **Source unique** des questions : nom, libellé, choix, questions conditionnelles |
+| `app/ml.py` | Modèle de score (points) et modèle de décision, explication en points |
 | `app/main.py` | Routes API + dashboard |
-| `training/train.py` | Entraînement reproductible, comparaison des modèles, choix du seuil |
+| `training/train.py` | Entraînement reproductible des deux modèles, comparaison, choix du seuil |
 | `model/` | Modèle déployé (`model.joblib`) et métriques (`metadata.json`) |
 | `kobo/build_xlsform.py` | Génère le formulaire Kobo depuis `schema.py` |
 | `kobo/formulaire_ciblage_menages.xlsx` | **Formulaire à importer dans KoboToolbox** |
@@ -40,9 +41,8 @@ KoboCollect ──soumission──▶ KoboToolbox ──REST Service (JSON)─�
 
 Quand il y a plus de ménages éligibles que le budget n'en permet (par exemple 10 000 éligibles et 3 000 places), la page **Sélection** du dashboard classe les éligibles et produit la liste.
 
-- **Score de priorité** : un **second modèle**, le modèle de priorité, apprend à prédire le **score que l'agent calculait avec sa grille Excel** (ici `Score_Vuln`). Les éligibles sont classés par ce score prédit.
-  - Sur les données v5 (grille avec exclusions et inclusions automatiques), il retrouve **96 %** de la liste qu'aurait produite l'agent pour un budget couvrant 30 % des éligibles, contre 83 à 85 % en classant avec le modèle de décision. Voir `notebooks/ciblage_avec_ml_v5.ipynb`.
-  - Si l'historique ne contient pas de score de l'agent, le classement se fait par repli sur l'indice du modèle de décision (`base + somme des contributions`).
+- **Score de priorité** : un **second modèle**, le modèle de priorité, apprend à prédire le **score que l'agent calculait avec sa grille Excel** (colonne `score_excel`). Les éligibles sont classés par ce score estimé, en points.
+  - Il retrouve **96,6 %** de la liste qu'aurait produite l'agent pour un budget couvrant 30 % des éligibles, contre 44 % en classant par la certitude du modèle de décision. Voir `notebooks/ciblage_avec_ml_v5.ipynb`.
   - On ne classe **pas** par probabilité d'éligibilité : elle mesure la certitude du modèle, pas l'intensité des besoins, et elle sature à 1.
 - **Deux modes de répartition** :
   - **globale** : les N ménages les plus prioritaires, toutes zones confondues ;
@@ -57,25 +57,29 @@ Quand il y a plus de ménages éligibles que le budget n'en permet (par exemple 
 
 ## Le modèle
 
-Voir `../ciblage_avec_ml_v3_desequilibre.ipynb` pour l'analyse complète. Résumé sur le jeu de test (15 000 ménages) :
+Il reproduit le processus de ciblage d'une ONG : une grille de points validée localement, des inclusions automatiques et des exclusions, puis la décision de l'agent dans Excel. Analyse complète : `notebooks/ciblage_avec_ml_v5.ipynb`.
 
-| | v2 (XGBoost, seuil 0,5) | v3 (régression logistique pondérée, seuil 0,45) |
-|---|---|---|
-| Rappel (éligibles retrouvés) | 86,9 % | **98,5 %** |
-| Éligibles exclus | 269 | **31** |
-| Précision | 88,6 % | 75,5 % |
-| F2 | 0,872 | **0,928** |
-| PR-AUC | 0,960 | **0,965** |
+Deux modèles LightGBM :
+1. **le modèle de score** estime le score de la grille (erreur moyenne de 0,33 point). Ses contributions TreeSHAP s'additionnent exactement : `score estimé = ménage moyen + somme des points par question`. C'est l'explication affichée dans le dashboard ;
+2. **le modèle de décision** reçoit les réponses et le score estimé (calculé hors-pli à l'entraînement, sans fuite). Il apprend les exceptions de la grille, que le score seul ne capture pas.
 
-- **Déséquilibre** : pondération des classes, plus un seuil choisi sur la validation pour maximiser le F2. Le F2 privilégie le rappel, car exclure un ménage vulnérable est plus grave qu'en inclure un de trop. SMOTE et le sous-échantillonnage ont été testés et n'apportent rien de plus.
-- **Plafond** : les données simulées contiennent un bruit aléatoire dans l'étiquette. Le modèle atteint le niveau d'un « oracle » qui connaîtrait le score de vulnérabilité exact. Les erreurs restantes se concentrent près du seuil, et c'est pour cela qu'il y a une revue humaine.
-- **Zone grise** : les ménages dont le score est à ±0,30 du seuil (≈ 6 % des ménages, ≈ 43 % des erreurs) sont signalés « à vérifier en priorité ».
-- **Explication** : `logit(score) = valeur de base + Σ contributions`. Chaque contribution est regroupée par question du formulaire. Pour la régression logistique elle est exacte (coef × écart à la moyenne) ; pour LightGBM ce sont des valeurs TreeSHAP natives.
+Résultats sur le jeu de test (15 000 ménages, 27 % d'éligibles) :
 
-Ré-entraîner (modèle de décision, plus modèle de priorité si la colonne `Score_Vuln` du score de l'agent est présente) :
+| | Résultat |
+|---|---|
+| Précision (objectif : au moins 98 %) | **99,7 %** |
+| Rappel | **98,2 %** |
+| Accord sur les exceptions (exclusions, inclusions automatiques) | **100 %** |
+| Zone grise (score à 3 points ou moins du seuil, ou modèle hésitant) | 14 % des ménages, **100 % des erreurs** |
+| Liste sous budget retrouvée (30 % des éligibles) | **96,6 %** |
+
+Le seuil de décision est le meilleur F1 parmi les seuils qui garantissent au moins 98 % de précision sur la validation. Les données sont simulées et sans bruit : sur de vraies décisions d'agents, qui contiennent du jugement, les scores seront plus bas, et la revue humaine prend tout son sens.
+
+Ré-entraîner (les données v5 sont générées automatiquement si elles sont absentes) :
 
 ```bash
-python -m training.train --data ../dataset_humanitaire_complexe_100k.csv
+python -m training.train
+python -m training.train --data mes_listes.csv --seuil-grille 40   # vos propres listes : questions de schema.py + eligible + score_excel
 ```
 
 ## Lancer en local
@@ -96,6 +100,7 @@ uvicorn app.main:app --reload
 ## Mettre en place KoboToolbox
 
 1. **Importer le formulaire** : sur https://kf.kobotoolbox.org (ou `eu.kobotoolbox.org`), cliquer sur *Nouveau → Importer un XLSForm* → `kobo/formulaire_ciblage_menages.xlsx` → *Déployer*.
+   - **Mettre à jour un projet existant** : ouvrir le projet, puis *Formulaire → ⋯ → Remplacer le formulaire* → `kobo/formulaire_ciblage_menages.xlsx` → *Redéployer*. Le REST Service est conservé.
    - Pour modifier le formulaire, changer `app/schema.py`, puis lancer `python kobo/build_xlsform.py` et réimporter. Ne pas renommer les questions ni les codes de choix directement dans Kobo : l'API ne les reconnaîtrait plus.
    - Les questions peuvent être déplacées entre groupes : l'API ignore les préfixes de groupe.
 2. **Brancher le webhook** : dans le projet, *Paramètres → REST Services → Enregistrer un nouveau service* :
@@ -129,14 +134,14 @@ Limite du plan gratuit : le service s'endort après 15 minutes sans trafic, et l
 | Méthode | Route | Auth | Rôle |
 |---|---|---|---|
 | POST | `/api/kobo/webhook` | jeton | Réception d'une soumission Kobo |
-| POST | `/api/predict` | — | Prédiction + explication sans enregistrement (codes Kobo ou valeurs d'entraînement) |
+| POST | `/api/predict` | — | Prédiction + explication en points, sans enregistrement |
 | GET | `/api/modele` | — | Métriques et paramètres du modèle |
 | GET | `/api/beneficiaires` | Basic | Liste (`statut`, `decision`, `limit`, `offset`) |
 | GET | `/api/beneficiaires/{id}` | Basic | Détail : réponses, explication, historique des revues |
 | POST | `/api/beneficiaires/{id}/revision` | Basic | `{"approuve": false, "commentaire": "..."}` |
 | POST | `/api/kobo/sync` | Basic | Import des soumissions via l'API Kobo |
 | POST | `/api/selections` | Basic | `{"nombre": 3000, "repartition": "globale" \| "proportionnelle_zone", "inclure_non_revus": true, "nom": "..."}` |
-| GET | `/api/selections/{id}` | Basic | Liste retenue, classée par indice de priorité |
+| GET | `/api/selections/{id}` | Basic | Liste retenue, classée par score estimé |
 | GET | `/health` | — | Supervision |
 
 ## Pistes suivantes

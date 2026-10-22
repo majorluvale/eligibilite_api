@@ -31,7 +31,6 @@ class Settings:
     kobo_server_url: str
     kobo_api_token: str
     kobo_asset_uid: str
-    review_band: float | None  # None = marge enregistrée avec le modèle
     model_dir: str | None
 
 
@@ -65,6 +64,5 @@ def get_settings() -> Settings:
         kobo_server_url=os.getenv("KOBO_SERVER_URL", "https://kf.kobotoolbox.org").rstrip("/"),
         kobo_api_token=os.getenv("KOBO_API_TOKEN", ""),
         kobo_asset_uid=os.getenv("KOBO_ASSET_UID", ""),
-        review_band=float(os.environ["REVIEW_BAND"]) if os.getenv("REVIEW_BAND") else None,
         model_dir=os.getenv("MODEL_DIR") or None,
     )

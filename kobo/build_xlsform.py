@@ -25,19 +25,21 @@ OUT = ROOT / "kobo" / "formulaire_ciblage_menages.xlsx"
 SURVEY_COLS = ["type", "name", "label", "hint", "required", "constraint", "constraint_message",
                "relevant", "appearance"]
 
-# Ordre et regroupement des questions du modèle dans le formulaire
+# Ordre et regroupement des questions dans le formulaire (toutes les questions de app/schema.py)
 GROUPS = [
-    ("menage", "Composition du ménage",
-     ["location", "statut_menage", "sexe_chef_menage", "age_chef_menage", "taille_menage",
-      "membre_handicap", "femme_enceinte_allaitante"]),
-    ("conditions_vie", "Logement et accès à l'eau", ["type_logement", "source_eau"]),
-    ("economie", "Économie et sécurité alimentaire",
-     ["source_revenu", "nombre_repas_jour", "dette_contractee_crise"]),
+    ("profil", "Profil du ménage",
+     ["localite", "statut_menage", "duree_deplacement_mois", "sexe_chef_menage", "age_chef_menage",
+      "taille_menage", "enfants_moins_5"]),
+    ("vulnerabilites", "Vulnérabilités",
+     ["membre_handicap", "membre_maladie_chronique", "femme_enceinte_allaitante", "enfant_non_accompagne_heberge"]),
+    ("logement", "Logement et biens", ["type_logement", "articles_essentiels", "possede_betail"]),
+    ("alimentation_revenus", "Alimentation et revenus", ["repas_par_jour", "jours_sans_nourriture_7j", "source_revenu"]),
+    ("assistance", "Assistance reçue", ["assistance_3_derniers_mois", "type_assistance_recue"]),
 ]
 # Questions numériques présentées comme un choix (libellés plus clairs pour l'enquêteur)
-AS_CHOICES = {"nombre_repas_jour": {"1": "1 repas ou moins", "2": "2 repas", "3": "3 repas ou plus"}}
-# Libellés affichés à l'enquêteur quand ils diffèrent des valeurs d'entraînement (les codes ne changent pas)
-FORM_LABELS = {"sexe_chef_menage": {"m": "Homme", "f": "Femme"}}
+AS_CHOICES = {"repas_par_jour": {"1": "1 repas ou moins", "2": "2 repas", "3": "3 repas ou plus"}}
+# Contraintes entre questions, vérifiées par Kobo dès la saisie (l'API les vérifie aussi)
+CONTRAINTES = {"enfants_moins_5": (". < ${taille_menage}", "Doit être inférieur à la taille du ménage (le chef de ménage en fait partie)")}
 CONSENT = "${consentement} = 'oui'"
 
 
@@ -87,18 +89,25 @@ def build() -> Path:
         survey.append(row(type="begin_group", name=group, label=label, relevant=CONSENT))
         for name in names:
             f = FEATURES_BY_KOBO[name]
+            relevant = ""
+            if f.relevant:  # question conditionnelle (logique de saut)
+                question, valeurs = f.relevant
+                relevant = " or ".join(f"${{{question}}} = '{v}'" for v in sorted(valeurs))
             if name in AS_CHOICES:
                 add_list(name, AS_CHOICES[name])
-                survey.append(row(type=f"select_one {name}", name=name, label=f.label, hint=f.hint, required="yes"))
+                survey.append(row(type=f"select_one {name}", name=name, label=f.label, hint=f.hint, required="yes",
+                                  relevant=relevant))
             elif f.kind == "integer":
+                contrainte, message = f". >= {f.min} and . <= {f.max}", f"La valeur doit être comprise entre {f.min} et {f.max}"
+                if name in CONTRAINTES:
+                    contrainte, message = f"{contrainte} and {CONTRAINTES[name][0]}", f"{message}. {CONTRAINTES[name][1]}"
                 survey.append(row(type="integer", name=name, label=f.label, hint=f.hint, required="yes",
-                                  constraint=f". >= {f.min} and . <= {f.max}",
-                                  constraint_message=f"La valeur doit être comprise entre {f.min} et {f.max}"))
+                                  constraint=contrainte, constraint_message=message, relevant=relevant))
             else:
                 list_name = "oui_non" if f.choices == {"oui": "Oui", "non": "Non"} else name
-                add_list(list_name, FORM_LABELS.get(name, f.choices))
+                add_list(list_name, f.choices)
                 survey.append(row(type=f"select_one {list_name}", name=name, label=f.label, hint=f.hint,
-                                  required="yes"))
+                                  required="yes", relevant=relevant))
         survey.append(row(type="end_group", name=""))
 
     survey.append(row(type="note", name="fin", relevant=CONSENT,

@@ -5,7 +5,7 @@
 <div class="page-head">
   <div>
     <h1>{{ b.nom_chef_menage or ('Ménage #' ~ b.id) }}</h1>
-    <p class="muted">{{ b.village or 'Village non renseigné' }} · {{ b.features.Location }} · soumission {{ b.kobo_key }}
+    <p class="muted">{{ b.village or 'Village non renseigné' }} · {{ b.zone or 'localité inconnue' }} · soumission {{ b.kobo_key }}
       · reçue le {{ (b.submitted_at or b.received_at).strftime('%d/%m/%Y à %H:%M') }}</p>
   </div>
 </div>
@@ -17,12 +17,14 @@
   <div class="card">
     <h3>Décision du modèle</h3>
     <span class="pill big {{ 'yes' if b.model_decision else 'no' }}">{{ 'Éligible' if b.model_decision else 'Non éligible' }}</span>
-    <div class="gauge" aria-label="Score {{ '%.2f'|format(b.score) }}, seuil {{ '%.2f'|format(b.threshold) }}">
-      <div class="gauge-fill {{ 'yes' if b.model_decision else 'no' }}" style="width: {{ (b.score * 100)|round(1) }}%"></div>
-      <div class="gauge-thr" style="left: {{ (b.threshold * 100)|round(1) }}%"><span>seuil {{ '%.2f'|format(b.threshold) }}</span></div>
+    {% set echelle = [80, b.points + 5]|max %}
+    <div class="gauge" aria-label="Score estimé {{ '%.1f'|format(b.points) }} points, seuil de la grille {{ seuil_grille }}">
+      <div class="gauge-fill {{ 'yes' if b.model_decision else 'no' }}" style="width: {{ ([b.points, 0]|max / echelle * 100)|round(1) }}%"></div>
+      <div class="gauge-thr" style="left: {{ (seuil_grille / echelle * 100)|round(1) }}%"><span>seuil {{ '%g'|format(seuil_grille) }} pts</span></div>
     </div>
-    <p class="muted small">Score {{ '%.2f'|format(b.score) }} sur 1. Le ménage est éligible si le score atteint le seuil.
-      {% if b.a_verifier %}<br><strong class="warn-text">Score proche du seuil : décision à vérifier en priorité.</strong>{% endif %}</p>
+    <p class="muted small">Score estimé : <strong>{{ '%.1f'|format(b.points) }} points</strong> dans la grille de l'ONG
+      (probabilité d'éligibilité : {{ '%.2f'|format(b.score) }}).
+      {% if b.a_verifier %}<br><strong class="warn-text">Score proche du seuil de la grille : décision à vérifier en priorité.</strong>{% endif %}</p>
   </div>
   <div class="card">
     <h3>Décision finale</h3>
@@ -40,8 +42,8 @@
   <h2>Pourquoi le modèle a décidé ainsi</h2>
   <p class="summary">{{ b.summary }}</p>
   <div class="legend">
-    <span><i class="sw no"></i> éloigne de l'éligibilité</span>
-    <span><i class="sw yes"></i> rapproche de l'éligibilité</span>
+    <span><i class="sw no"></i> retire des points</span>
+    <span><i class="sw yes"></i> ajoute des points</span>
   </div>
   <div class="contrib">
     {% for e in b.explanation %}
@@ -52,13 +54,14 @@
         <div class="half neg">{% if e.contribution < 0 %}<div class="bar no" style="width: {{ w }}%"></div>{% endif %}</div>
         <div class="half pos">{% if e.contribution > 0 %}<div class="bar yes" style="width: {{ w }}%"></div>{% endif %}</div>
       </div>
-      <div class="cval">{{ '%+.2f'|format(e.contribution) }}<small>{{ (e.share * 100)|round|int }} %</small></div>
+      <div class="cval">{{ '%+.1f'|format(e.contribution) }} pts<small>{{ (e.share * 100)|round|int }} %</small></div>
     </div>
     {% endfor %}
   </div>
-  <p class="muted small">Chaque barre indique de combien la réponse déplace le score par rapport à un ménage moyen
-    (contribution en log-odds ; le % est la part dans l'ensemble des effets). Les effets s'additionnent :
-    valeur de base {{ '%+.2f'|format(b.base_value) }} + somme des contributions = score du ménage.</p>
+  <p class="muted small">Chaque barre indique combien de points la réponse ajoute ou retire par rapport à un ménage moyen,
+    comme une ligne de la feuille de calcul de l'agent. Les points s'additionnent :
+    {{ '%.1f'|format(b.base_value) }} (ménage moyen) + somme des points = {{ '%.1f'|format(b.points) }} points.
+    Les exclusions et inclusions automatiques de la grille sont appliquées par le modèle de décision et signalées dans le résumé.</p>
 </section>
 
 <section class="two-col">
@@ -69,7 +72,7 @@
       <tr><th>{{ label }}</th><td>{{ b[key] or '—' }}</td></tr>
       {% endfor %}
       {% for f in features %}
-      <tr><th>{{ f.label }}</th><td>{{ b.features[f.name] }}</td></tr>
+      <tr><th>{{ f.label }}</th><td>{{ libelle(f.name, b.features.get(f.name)) }}</td></tr>
       {% endfor %}
     </table>
   </div>

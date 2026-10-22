@@ -8,6 +8,7 @@ from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, Stri
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 from .config import get_settings
+from .schema import ZONE_FIELD
 
 
 def utcnow() -> datetime:
@@ -54,6 +55,16 @@ class Beneficiary(Base):
 
     reviews: Mapped[list["Review"]] = relationship(
         back_populates="beneficiary", order_by="Review.created_at.desc()", cascade="all, delete-orphan")
+
+    @property
+    def zone(self) -> str | None:
+        """Zone utilisée pour répartir le budget (question `localite` du formulaire)."""
+        return (self.features or {}).get(ZONE_FIELD)
+
+    @property
+    def points(self) -> float:
+        """Score estimé dans la grille de l'ONG = base + somme des points par question."""
+        return self.base_value + sum(e["contribution"] for e in self.explanation)
 
 
 class Review(Base):

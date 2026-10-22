@@ -1,170 +1,206 @@
 {
-  "version": "20261022123431",
-  "modele": "regression_logistique_ponderee",
-  "seuil": 0.45,
-  "beta": 2.0,
-  "taux_eligibles_entrainement": 0.1368,
+  "version": "20261022192804",
+  "modele": "score prédit + LightGBM",
+  "seuil": 0.93,
+  "seuil_grille": 40,
+  "precision_minimale": 0.98,
+  "taux_eligibles_entrainement": 0.2705,
   "n_entrainement": 70000,
+  "donnees": "ciblage_v5.csv",
   "validation_comparaison": [
     {
-      "modele": "regression_logistique_ponderee",
-      "seuil": 0.45,
-      "pr_auc": 0.9696,
-      "roc_auc": 0.9948,
-      "rappel": 0.9834,
-      "precision": 0.7686,
-      "f1": 0.8628,
-      "f2": 0.9314,
-      "balanced_accuracy": 0.9682,
+      "modele": "regression_logistique",
+      "seuil": 0.5,
+      "precision": 0.9214,
+      "rappel": 0.8812,
+      "f1": 0.9008,
+      "accuracy": 0.9475,
+      "pr_auc": 0.9613,
       "matrice_confusion": {
-        "vn": 12339,
-        "fp": 608,
-        "fn": 34,
-        "vp": 2019
+        "vn": 10638,
+        "fp": 305,
+        "fn": 482,
+        "vp": 3575
       }
     },
     {
-      "modele": "lightgbm_pondere",
-      "seuil": 0.46,
-      "pr_auc": 0.9653,
-      "roc_auc": 0.994,
-      "rappel": 0.9766,
-      "precision": 0.7618,
-      "f1": 0.8559,
-      "f2": 0.9245,
-      "balanced_accuracy": 0.9641,
+      "modele": "lightgbm",
+      "seuil": 0.5,
+      "precision": 0.9882,
+      "rappel": 0.9689,
+      "f1": 0.9785,
+      "accuracy": 0.9885,
+      "pr_auc": 0.9987,
       "matrice_confusion": {
-        "vn": 12320,
-        "fp": 627,
-        "fn": 48,
-        "vp": 2005
+        "vn": 10896,
+        "fp": 47,
+        "fn": 126,
+        "vp": 3931
       }
     },
     {
-      "modele": "lightgbm_non_pondere",
-      "seuil": 0.2,
-      "pr_auc": 0.967,
-      "roc_auc": 0.9942,
-      "rappel": 0.9693,
-      "precision": 0.7801,
-      "f1": 0.8645,
-      "f2": 0.9245,
-      "balanced_accuracy": 0.963,
+      "modele": "score_predit_plus_lightgbm",
+      "seuil": 0.5,
+      "precision": 0.9914,
+      "rappel": 0.9926,
+      "f1": 0.992,
+      "accuracy": 0.9957,
+      "pr_auc": 0.9998,
       "matrice_confusion": {
-        "vn": 12386,
-        "fp": 561,
-        "fn": 63,
-        "vp": 1990
+        "vn": 10908,
+        "fp": 35,
+        "fn": 30,
+        "vp": 4027
       }
     }
   ],
   "test": {
-    "seuil": 0.45,
-    "pr_auc": 0.9652,
-    "roc_auc": 0.994,
-    "rappel": 0.9849,
-    "precision": 0.7552,
-    "f1": 0.8549,
-    "f2": 0.9284,
-    "balanced_accuracy": 0.9672,
+    "seuil": 0.93,
+    "precision": 0.9972,
+    "rappel": 0.9823,
+    "f1": 0.9897,
+    "accuracy": 0.9945,
+    "pr_auc": 0.9997,
     "matrice_confusion": {
-      "vn": 12293,
-      "fp": 655,
-      "fn": 31,
-      "vp": 2021
+      "vn": 10932,
+      "fp": 11,
+      "fn": 72,
+      "vp": 3985
+    },
+    "erreur_score_points": 0.328
+  },
+  "accord_par_motif": [
+    {
+      "motif": "exclusion : assistance récente (vivres/cash)",
+      "accord": 1.0,
+      "menages": 1639
+    },
+    {
+      "motif": "exclusion : salaire régulier",
+      "accord": 1.0,
+      "menages": 1089
+    },
+    {
+      "motif": "inclusion automatique",
+      "accord": 1.0,
+      "menages": 506
+    },
+    {
+      "motif": "score < 40",
+      "accord": 0.9987,
+      "menages": 8215
+    },
+    {
+      "motif": "score >= 40",
+      "accord": 0.9797,
+      "menages": 3551
     }
-  },
-  "test_sans_traitement": {
-    "seuil": 0.5,
-    "pr_auc": 0.9631,
-    "roc_auc": 0.9937,
-    "rappel": 0.8577,
-    "precision": 0.888,
-    "f1": 0.8726,
-    "f2": 0.8636,
-    "balanced_accuracy": 0.9203,
-    "matrice_confusion": {
-      "vn": 12726,
-      "fp": 222,
-      "fn": 292,
-      "vp": 1760
-    }
-  },
-  "zone_grise": {
-    "marge": 0.3,
-    "part_menages": 0.0575,
-    "part_erreurs": 0.4329
-  },
-  "variables": [
-    "Location",
-    "Statut_Menage",
-    "Sexe_Chef_Menage",
-    "Age_Chef_Menage",
-    "Taille_Menage",
-    "Membre_Handicap_Maladie_Chronique",
-    "Femme_Enceinte_Allaitante",
-    "Type_Logement",
-    "Source_Eau",
-    "Source_Revenu",
-    "Nombre_Repas_Jour",
-    "Dette_Contractee_Crise"
   ],
+  "zone_grise": {
+    "marge_points": 3,
+    "part_menages": 0.1404,
+    "part_erreurs": 1.0
+  },
   "priorite": {
     "methode": "score_predit",
-    "cible": "Score_Vuln",
-    "erreur_moyenne_points": 0.102,
-    "spearman": 0.9971,
-    "recouvrement_top30_score_predit": 0.9707,
-    "recouvrement_top30_log_odds": 0.9691
+    "cible": "score_excel",
+    "erreur_moyenne_points": 0.328,
+    "spearman": 0.9966,
+    "recouvrement_top30_score_predit": 0.9663,
+    "recouvrement_top30_log_odds": 0.4355
   },
   "importance_globale": [
     {
-      "feature": "Statut_Menage",
-      "importance": 3.2504
+      "feature": "statut_menage",
+      "importance": 5.623
     },
     {
-      "feature": "Source_Eau",
-      "importance": 2.8168
+      "feature": "repas_par_jour",
+      "importance": 3.515
     },
     {
-      "feature": "Nombre_Repas_Jour",
-      "importance": 2.6047
+      "feature": "type_logement",
+      "importance": 3.124
     },
     {
-      "feature": "Type_Logement",
-      "importance": 2.1229
+      "feature": "sexe_chef_menage",
+      "importance": 2.602
     },
     {
-      "feature": "Source_Revenu",
-      "importance": 2.0665
+      "feature": "source_revenu",
+      "importance": 2.254
     },
     {
-      "feature": "Age_Chef_Menage",
-      "importance": 1.7788
+      "feature": "articles_essentiels",
+      "importance": 2.216
     },
     {
-      "feature": "Taille_Menage",
-      "importance": 1.674
+      "feature": "taille_menage",
+      "importance": 2.004
     },
     {
-      "feature": "Sexe_Chef_Menage",
-      "importance": 1.2795
+      "feature": "jours_sans_nourriture_7j",
+      "importance": 1.931
     },
     {
-      "feature": "Membre_Handicap_Maladie_Chronique",
-      "importance": 1.1922
+      "feature": "possede_betail",
+      "importance": 1.853
     },
     {
-      "feature": "Location",
-      "importance": 0.1339
+      "feature": "age_chef_menage",
+      "importance": 1.641
     },
     {
-      "feature": "Dette_Contractee_Crise",
-      "importance": 0.0203
+      "feature": "femme_enceinte_allaitante",
+      "importance": 1.588
     },
     {
-      "feature": "Femme_Enceinte_Allaitante",
-      "importance": 0.0064
+      "feature": "enfants_moins_5",
+      "importance": 1.509
+    },
+    {
+      "feature": "membre_handicap",
+      "importance": 1.489
+    },
+    {
+      "feature": "membre_maladie_chronique",
+      "importance": 1.087
+    },
+    {
+      "feature": "duree_deplacement_mois",
+      "importance": 0.768
+    },
+    {
+      "feature": "enfant_non_accompagne_heberge",
+      "importance": 0.726
+    },
+    {
+      "feature": "assistance_3_derniers_mois",
+      "importance": 0.001
+    },
+    {
+      "feature": "type_assistance_recue",
+      "importance": 0.001
     }
+  ],
+  "variables": [
+    "statut_menage",
+    "duree_deplacement_mois",
+    "sexe_chef_menage",
+    "age_chef_menage",
+    "taille_menage",
+    "enfants_moins_5",
+    "membre_handicap",
+    "membre_maladie_chronique",
+    "femme_enceinte_allaitante",
+    "enfant_non_accompagne_heberge",
+    "type_logement",
+    "articles_essentiels",
+    "repas_par_jour",
+    "jours_sans_nourriture_7j",
+    "source_revenu",
+    "possede_betail",
+    "assistance_3_derniers_mois",
+    "type_assistance_recue"
   ]
 }

@@ -20,7 +20,7 @@ from . import kobo, services
 from .config import get_settings
 from .db import Beneficiary, Selection, get_session, init_db
 from .ml import load_metadata, load_model
-from .schema import FEATURES, IDENTITY_FIELDS, SHORT_LABELS, ValidationError, normalize_features
+from .schema import FEATURES, IDENTITY_FIELDS, SHORT_LABELS, ValidationError, libelle, normalize_features
 from .security import check_csrf, check_webhook_token, csrf_token, current_user
 
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +46,7 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
 templates.env.globals["SHORT_LABELS"] = SHORT_LABELS
+templates.env.globals["libelle"] = libelle
 
 
 def fmt_pct(v):
@@ -80,9 +81,12 @@ class PredictionOut(BaseModel):
     eligible: bool
     score: float
     threshold: float
+    points: float
+    seuil_grille: float
     a_verifier: bool
     base_value: float
     explanation: list[dict]
+    exception: dict | None
     summary: str
     model_version: str
     indice_priorite: float
@@ -91,17 +95,18 @@ class PredictionOut(BaseModel):
 
 @app.post("/api/predict", tags=["modèle"], response_model=PredictionOut)
 def predict(reponses: dict = Body(..., examples=[{
-    "location": "zone_e", "statut_menage": "idp", "sexe_chef_menage": "f", "age_chef_menage": 34,
-    "taille_menage": 9, "membre_handicap": "non", "femme_enceinte_allaitante": "oui",
-    "type_logement": "transitionnel", "source_eau": "puits_ouvert", "source_revenu": "journalier",
-    "nombre_repas_jour": 1, "dette_contractee_crise": "oui"}])):
-    """Prédiction sans enregistrement. Accepte les codes Kobo ou les valeurs d'entraînement."""
+    "localite": "Kibirizi", "statut_menage": "deplace", "duree_deplacement_mois": 2, "sexe_chef_menage": "femme",
+    "age_chef_menage": 34, "taille_menage": 7, "enfants_moins_5": 2, "membre_handicap": "non",
+    "membre_maladie_chronique": "non", "femme_enceinte_allaitante": "oui", "enfant_non_accompagne_heberge": "non",
+    "type_logement": "abri_fortune", "articles_essentiels": 1, "repas_par_jour": 1, "jours_sans_nourriture_7j": 2,
+    "source_revenu": "travail_journalier", "possede_betail": "non", "assistance_3_derniers_mois": "non"}])):
+    """Prédiction sans enregistrement (codes Kobo ou libellés des choix)."""
     try:
         features = normalize_features(kobo.flatten(reponses))
     except ValidationError as e:
         raise HTTPException(422, str(e))
     s = get_settings()
-    return load_model(s.model_dir).predict(features, review_band=s.review_band)
+    return load_model(s.model_dir).predict(features)
 
 
 @app.get("/api/modele", tags=["modèle"])
@@ -219,6 +224,7 @@ def beneficiary_page(request: Request, ben_id: int, msg: str | None = None, err:
     return templates.TemplateResponse(request, "beneficiaire.html", {
         "user": user, "b": ben, "features": FEATURES, "identity_fields": IDENTITY_FIELDS,
         "max_abs": max_abs, "csrf": csrf_token(user), "msg": msg, "err": err,
+        "seuil_grille": load_model(get_settings().model_dir).seuil_grille,
     })
 
 

@@ -6,17 +6,17 @@ from app.security import csrf_token
 from app.services import repartir
 from tests.test_api import KOBO_PAYLOAD, auth, client  # noqa: F401  (fixture partagée)
 
-# Ménages éligibles de vulnérabilité croissante : plus de critères cochés => indice de priorité plus élevé
+# Ménages éligibles de vulnérabilité croissante (score de la grille : environ 42, 48, 55 et 78 points)
+_BASE = {"profil/statut_menage": "resident", "profil/sexe_chef_menage": "femme", "profil/taille_menage": "8",
+         "profil/enfants_moins_5": "3", "vulnerabilites/femme_enceinte_allaitante": "non",
+         "logement/type_logement": "maison_endommagee", "logement/articles_essentiels": "3",
+         "alimentation_revenus/repas_par_jour": "2", "alimentation_revenus/jours_sans_nourriture_7j": "1"}
 PROFILS = [
-    {"menage/location": "zone_d", "menage/statut_menage": "idp", "conditions_vie/type_logement": "transitionnel",
-     "economie/nombre_repas_jour": "1", "conditions_vie/source_eau": "puits_ouvert", "menage/age_chef_menage": "35"},
-    {"menage/location": "zone_d", "menage/statut_menage": "idp", "conditions_vie/type_logement": "urgence",
-     "economie/nombre_repas_jour": "1", "conditions_vie/source_eau": "surface", "menage/age_chef_menage": "35"},
-    {"menage/location": "zone_e", "menage/statut_menage": "idp", "conditions_vie/type_logement": "urgence",
-     "economie/nombre_repas_jour": "1", "conditions_vie/source_eau": "surface", "menage/age_chef_menage": "16"},
-    {"menage/location": "zone_e", "menage/statut_menage": "refugie", "conditions_vie/type_logement": "urgence",
-     "economie/nombre_repas_jour": "1", "conditions_vie/source_eau": "surface", "menage/age_chef_menage": "15",
-     "menage/membre_handicap": "oui", "economie/source_revenu": "sans_emploi"},
+    {**_BASE, "profil/localite": "Kibirizi"},
+    {**_BASE, "profil/localite": "Kibirizi", "logement/type_logement": "abri_fortune"},
+    {**_BASE, "profil/localite": "Binza", "logement/type_logement": "abri_fortune", "alimentation_revenus/repas_par_jour": "1"},
+    {**_BASE, "profil/localite": "Binza", "logement/type_logement": "abri_fortune", "alimentation_revenus/repas_par_jour": "1",
+     "profil/statut_menage": "deplace", "profil/duree_deplacement_mois": "1", "vulnerabilites/membre_handicap": "oui"},
 ]
 
 
@@ -24,7 +24,7 @@ PROFILS = [
 def menages(client):
     ids = []
     for i, profil in enumerate(PROFILS):
-        p = copy.deepcopy(KOBO_PAYLOAD)
+        p = {k: v for k, v in copy.deepcopy(KOBO_PAYLOAD).items() if k != "profil/duree_deplacement_mois"}
         p.update(profil)
         p.update({"_id": 9000 + i, "_uuid": f"sel-{i}", "identification/nom_chef_menage": f"Profil {i}"})
         r = client.post("/api/kobo/webhook?token=tok123", json=p)

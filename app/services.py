@@ -1,15 +1,14 @@
 """Logique métier : évaluer une soumission, enregistrer une revue humaine, statistiques."""
 from __future__ import annotations
 
-import pandas as pd
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import kobo
 from .config import get_settings
 from .db import Beneficiary, Review, Selection, SelectionItem, utcnow
-from .ml import load_model
-from .schema import normalize_features
+from .ml import load_model, prepare
+from .schema import FEATURE_NAMES, normalize_features
 
 
 def ingest_submission(session: Session, payload: dict, source: str) -> tuple[Beneficiary, bool]:
@@ -24,7 +23,7 @@ def ingest_submission(session: Session, payload: dict, source: str) -> tuple[Ben
     flat = kobo.flatten(payload)
     features = normalize_features(flat)  # lève ValidationError si une réponse est invalide
     settings = get_settings()
-    result = load_model(settings.model_dir).predict(features, review_band=settings.review_band)
+    result = load_model(settings.model_dir).predict(features)
 
     ben = session.scalar(select(Beneficiary).where(Beneficiary.kobo_key == key))
     created = ben is None
@@ -90,7 +89,7 @@ def priorites(menages: list[Beneficiary]) -> tuple[list[float], str]:
     pas l'intensité des besoins, et vaut presque 1 pour beaucoup de ménages.
     """
     model = load_model(get_settings().model_dir)
-    valeurs = model.priorities(pd.DataFrame([b.features for b in menages]))
+    valeurs = model.priorities(prepare([b.features for b in menages]))
     return [float(v) for v in valeurs], model.priority_method
 
 
@@ -123,7 +122,8 @@ def creer_selection(session: Session, nom: str, nb: int, repartition: str, inclu
     query = select(Beneficiary).where(Beneficiary.final_decision.is_(True))
     if not inclure_non_revus:
         query = query.where(Beneficiary.statut_revue != "en_attente")
-    eligibles = session.scalars(query).all()
+    # les ménages évalués avec un ancien questionnaire (autres questions) ne peuvent pas être classés par ce modèle
+    eligibles = [b for b in session.scalars(query).all() if all(k in b.features for k in FEATURE_NAMES)]
     if not eligibles:
         raise ValueError("Aucun ménage éligible ne correspond à ces critères.")
 
@@ -135,11 +135,11 @@ def creer_selection(session: Session, nom: str, nb: int, repartition: str, inclu
     if repartition == "globale":
         for rang, b in enumerate(ordre, 1):
             items.append(SelectionItem(beneficiary=b, rang=rang, priorite=prio[b.id],
-                                       zone=b.features["Location"], retenu=rang <= nb))
+                                       zone=b.zone or "?", retenu=rang <= nb))
     else:
         par_zone: dict[str, list[Beneficiary]] = {}
         for b in ordre:
-            par_zone.setdefault(b.features["Location"], []).append(b)
+            par_zone.setdefault(b.zone or "?", []).append(b)
         quotas = repartir(nb, {z: len(m) for z, m in par_zone.items()})
         for zone, menages in par_zone.items():
             for rang, b in enumerate(menages, 1):
