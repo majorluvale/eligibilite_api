@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Bénéficiaires — Ciblage{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Ménages évalués</h1>
+    <p class="muted">Décisions du modèle reçues depuis KoboToolbox, à confirmer ou désapprouver.</p>
+  </div>
+  <div class="actions">
+    <a class="btn ghost" href="/dashboard/export.csv">Exporter CSV</a>
+    {% if sync_enabled %}
+    <form method="post" action="/dashboard/sync">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn">Synchroniser Kobo</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+
+<section class="kpis">
+  <div class="kpi"><span>Ménages reçus</span><strong>{{ stats.total }}</strong></div>
+  <div class="kpi"><span>Éligibles (modèle)</span><strong>{{ stats.eligibles_modele }}</strong></div>
+  <div class="kpi"><span>Éligibles (final)</span><strong>{{ stats.eligibles_final }}</strong></div>
+  <div class="kpi warn"><span>Zone grise à vérifier</span><strong>{{ stats.a_verifier }}</strong></div>
+  <div class="kpi"><span>En attente de revue</span><strong>{{ stats.en_attente }}</strong></div>
+  <div class="kpi"><span>Désaccords humain / modèle</span><strong>{{ stats.modifies }}</strong>
+    <small>{{ stats.taux_desaccord|pct }} des revues</small></div>
+</section>
+
+<form class="filters" method="get" action="/dashboard">
+  <input type="search" name="q" placeholder="Nom, village, téléphone, ID Kobo…" value="{{ filters.q or '' }}">
+  <select name="decision">
+    <option value="">Toutes décisions</option>
+    <option value="eligible" {% if filters.decision == 'eligible' %}selected{% endif %}>Éligible</option>
+    <option value="non_eligible" {% if filters.decision == 'non_eligible' %}selected{% endif %}>Non éligible</option>
+  </select>
+  <select name="statut">
+    <option value="">Tous statuts</option>
+    <option value="en_attente" {% if filters.statut == 'en_attente' %}selected{% endif %}>En attente</option>
+    <option value="confirmee" {% if filters.statut == 'confirmee' %}selected{% endif %}>Confirmée</option>
+    <option value="modifiee" {% if filters.statut == 'modifiee' %}selected{% endif %}>Modifiée par un humain</option>
+  </select>
+  <label class="check"><input type="checkbox" name="a_verifier" value="true" {% if filters.a_verifier %}checked{% endif %}> Zone grise seulement</label>
+  <button class="btn">Filtrer</button>
+  {% if filters %}<a class="btn ghost" href="/dashboard">Réinitialiser</a>{% endif %}
+</form>
+
+<div class="table-scroll">
+<table class="list">
+  <thead>
+    <tr>
+      <th>Chef de ménage</th><th>Village</th><th>Zone</th><th>Reçu le</th>
+      <th class="num">Score</th><th>Modèle</th><th>Décision finale</th><th>Revue</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for b in rows %}
+    <tr onclick="location.href='/dashboard/beneficiaires/{{ b.id }}'">
+      <td><a href="/dashboard/beneficiaires/{{ b.id }}">{{ b.nom_chef_menage or ('Ménage #' ~ b.id) }}</a>
+        {% if b.a_verifier and b.statut_revue == 'en_attente' %}<span class="tag warn" title="Score proche du seuil">zone grise</span>{% endif %}</td>
+      <td>{{ b.village or '—' }}</td>
+      <td>{{ b.features.Location }}</td>
+      <td>{{ (b.submitted_at or b.received_at).strftime('%d/%m/%Y %H:%M') }}</td>
+      <td class="num">{{ '%.2f'|format(b.score) }}</td>
+      <td><span class="pill {{ 'yes' if b.model_decision else 'no' }}">{{ 'Éligible' if b.model_decision else 'Non éligible' }}</span></td>
+      <td><span class="pill {{ 'yes' if b.final_decision else 'no' }}">{{ 'Éligible' if b.final_decision else 'Non éligible' }}</span></td>
+      <td>
+        {% if b.statut_revue == 'en_attente' %}<span class="tag">en attente</span>
+        {% elif b.statut_revue == 'confirmee' %}<span class="tag ok">confirmée</span>
+        {% else %}<span class="tag alt">modifiée</span>{% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr class="empty"><td colspan="8">Aucun ménage pour l'instant. Les soumissions Kobo apparaîtront ici dès réception.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if pages > 1 %}
+<nav class="pager">
+  {% if page > 1 %}<a href="?{{ qs }}{{ '&' if qs }}page={{ page - 1 }}">← Précédent</a>{% endif %}
+  <span>Page {{ page }} / {{ pages }} · {{ total }} ménages</span>
+  {% if page < pages %}<a href="?{{ qs }}{{ '&' if qs }}page={{ page + 1 }}">Suivant →</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

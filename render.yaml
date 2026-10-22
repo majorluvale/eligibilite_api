@@ -1,0 +1,22 @@
+# Déploiement gratuit sur Render : New > Blueprint > sélectionner ce dépôt
+services:
+  - type: web
+    name: eligibilite-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL        # URL Postgres Neon / Supabase (gratuit, persistant)
+        sync: false
+      - key: DASHBOARD_USERS     # ex. superviseur:motdepasse,agent1:motdepasse2
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: KOBO_WEBHOOK_TOKEN
+        generateValue: true
+      - key: KOBO_SERVER_URL
+        value: https://kf.kobotoolbox.org
+      - key: KOBO_API_TOKEN
+        sync: false
+      - key: KOBO_ASSET_UID
+        sync: false

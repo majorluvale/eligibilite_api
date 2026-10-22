@@ -1,0 +1,162 @@
+{
+  "version": "20261021200642",
+  "modele": "regression_logistique_ponderee",
+  "seuil": 0.45,
+  "beta": 2.0,
+  "taux_eligibles_entrainement": 0.1368,
+  "n_entrainement": 70000,
+  "validation_comparaison": [
+    {
+      "modele": "regression_logistique_ponderee",
+      "seuil": 0.45,
+      "pr_auc": 0.9696,
+      "roc_auc": 0.9948,
+      "rappel": 0.9834,
+      "precision": 0.7686,
+      "f1": 0.8628,
+      "f2": 0.9314,
+      "balanced_accuracy": 0.9682,
+      "matrice_confusion": {
+        "vn": 12339,
+        "fp": 608,
+        "fn": 34,
+        "vp": 2019
+      }
+    },
+    {
+      "modele": "lightgbm_pondere",
+      "seuil": 0.46,
+      "pr_auc": 0.9653,
+      "roc_auc": 0.994,
+      "rappel": 0.9766,
+      "precision": 0.7618,
+      "f1": 0.8559,
+      "f2": 0.9245,
+      "balanced_accuracy": 0.9641,
+      "matrice_confusion": {
+        "vn": 12320,
+        "fp": 627,
+        "fn": 48,
+        "vp": 2005
+      }
+    },
+    {
+      "modele": "lightgbm_non_pondere",
+      "seuil": 0.2,
+      "pr_auc": 0.967,
+      "roc_auc": 0.9942,
+      "rappel": 0.9693,
+      "precision": 0.7801,
+      "f1": 0.8645,
+      "f2": 0.9245,
+      "balanced_accuracy": 0.963,
+      "matrice_confusion": {
+        "vn": 12386,
+        "fp": 561,
+        "fn": 63,
+        "vp": 1990
+      }
+    }
+  ],
+  "test": {
+    "seuil": 0.45,
+    "pr_auc": 0.9652,
+    "roc_auc": 0.994,
+    "rappel": 0.9849,
+    "precision": 0.7552,
+    "f1": 0.8549,
+    "f2": 0.9284,
+    "balanced_accuracy": 0.9672,
+    "matrice_confusion": {
+      "vn": 12293,
+      "fp": 655,
+      "fn": 31,
+      "vp": 2021
+    }
+  },
+  "test_sans_traitement": {
+    "seuil": 0.5,
+    "pr_auc": 0.9631,
+    "roc_auc": 0.9937,
+    "rappel": 0.8577,
+    "precision": 0.888,
+    "f1": 0.8726,
+    "f2": 0.8636,
+    "balanced_accuracy": 0.9203,
+    "matrice_confusion": {
+      "vn": 12726,
+      "fp": 222,
+      "fn": 292,
+      "vp": 1760
+    }
+  },
+  "zone_grise": {
+    "marge": 0.3,
+    "part_menages": 0.0575,
+    "part_erreurs": 0.4329
+  },
+  "variables": [
+    "Location",
+    "Statut_Menage",
+    "Sexe_Chef_Menage",
+    "Age_Chef_Menage",
+    "Taille_Menage",
+    "Membre_Handicap_Maladie_Chronique",
+    "Femme_Enceinte_Allaitante",
+    "Type_Logement",
+    "Source_Eau",
+    "Source_Revenu",
+    "Nombre_Repas_Jour",
+    "Dette_Contractee_Crise"
+  ],
+  "importance_globale": [
+    {
+      "feature": "Statut_Menage",
+      "importance": 3.2504
+    },
+    {
+      "feature": "Source_Eau",
+      "importance": 2.8168
+    },
+    {
+      "feature": "Nombre_Repas_Jour",
+      "importance": 2.6047
+    },
+    {
+      "feature": "Type_Logement",
+      "importance": 2.1229
+    },
+    {
+      "feature": "Source_Revenu",
+      "importance": 2.0665
+    },
+    {
+      "feature": "Age_Chef_Menage",
+      "importance": 1.7788
+    },
+    {
+      "feature": "Taille_Menage",
+      "importance": 1.674
+    },
+    {
+      "feature": "Sexe_Chef_Menage",
+      "importance": 1.2795
+    },
+    {
+      "feature": "Membre_Handicap_Maladie_Chronique",
+      "importance": 1.1922
+    },
+    {
+      "feature": "Location",
+      "importance": 0.1339
+    },
+    {
+      "feature": "Dette_Contractee_Crise",
+      "importance": 0.0203
+    },
+    {
+      "feature": "Femme_Enceinte_Allaitante",
+      "importance": 0.0064
+    }
+  ]
+}

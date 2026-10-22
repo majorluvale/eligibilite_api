@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Ciblage des ménages{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/dashboard">Ciblage<span>·</span>Éligibilité</a>
+  <nav>
+    <a href="/dashboard" class="{% if request.url.path.startswith('/dashboard') and not request.url.path.startswith('/dashboard/modele') %}active{% endif %}">Bénéficiaires</a>
+    <a href="/dashboard/modele" class="{% if request.url.path.startswith('/dashboard/modele') %}active{% endif %}">Modèle</a>
+    <a href="/docs">API</a>
+  </nav>
+  <span class="user">{{ user }}</span>
+</header>
+<main class="wrap">
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

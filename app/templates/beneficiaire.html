@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}{{ b.nom_chef_menage or ('Ménage #' ~ b.id) }} — Ciblage{% endblock %}
+{% block content %}
+<a class="back" href="/dashboard">← Tous les ménages</a>
+<div class="page-head">
+  <div>
+    <h1>{{ b.nom_chef_menage or ('Ménage #' ~ b.id) }}</h1>
+    <p class="muted">{{ b.village or 'Village non renseigné' }} · {{ b.features.Location }} · soumission {{ b.kobo_key }}
+      · reçue le {{ (b.submitted_at or b.received_at).strftime('%d/%m/%Y à %H:%M') }}</p>
+  </div>
+</div>
+
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+{% if err %}<div class="flash error">{{ err }}</div>{% endif %}
+
+<section class="decision-grid">
+  <div class="card">
+    <h3>Décision du modèle</h3>
+    <span class="pill big {{ 'yes' if b.model_decision else 'no' }}">{{ 'Éligible' if b.model_decision else 'Non éligible' }}</span>
+    <div class="gauge" aria-label="Score {{ '%.2f'|format(b.score) }}, seuil {{ '%.2f'|format(b.threshold) }}">
+      <div class="gauge-fill {{ 'yes' if b.model_decision else 'no' }}" style="width: {{ (b.score * 100)|round(1) }}%"></div>
+      <div class="gauge-thr" style="left: {{ (b.threshold * 100)|round(1) }}%"><span>seuil {{ '%.2f'|format(b.threshold) }}</span></div>
+    </div>
+    <p class="muted small">Score {{ '%.2f'|format(b.score) }} sur 1. Le ménage est éligible si le score atteint le seuil.
+      {% if b.a_verifier %}<br><strong class="warn-text">Score proche du seuil : décision à vérifier en priorité.</strong>{% endif %}</p>
+  </div>
+  <div class="card">
+    <h3>Décision finale</h3>
+    <span class="pill big {{ 'yes' if b.final_decision else 'no' }}">{{ 'Éligible' if b.final_decision else 'Non éligible' }}</span>
+    <p class="small">
+      {% if b.statut_revue == 'en_attente' %}Pas encore revue : la décision du modèle s'applique.
+      {% elif b.statut_revue == 'confirmee' %}Confirmée par <strong>{{ b.reviewed_by }}</strong> le {{ b.reviewed_at.strftime('%d/%m/%Y %H:%M') }}.
+      {% else %}Modifiée par <strong>{{ b.reviewed_by }}</strong> le {{ b.reviewed_at.strftime('%d/%m/%Y %H:%M') }} : l'humain a désapprouvé le modèle.{% endif %}
+    </p>
+    <p class="muted small">Version du modèle : {{ b.model_version }}</p>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Pourquoi le modèle a décidé ainsi</h2>
+  <p class="summary">{{ b.summary }}</p>
+  <div class="legend">
+    <span><i class="sw no"></i> éloigne de l'éligibilité</span>
+    <span><i class="sw yes"></i> rapproche de l'éligibilité</span>
+  </div>
+  <div class="contrib">
+    {% for e in b.explanation %}
+    {% set w = (e.contribution|abs / max_abs * 100)|round(1) %}
+    <div class="crow">
+      <div class="clabel"><strong>{{ e.label }}</strong><span>{{ e.value }}</span></div>
+      <div class="cbar">
+        <div class="half neg">{% if e.contribution < 0 %}<div class="bar no" style="width: {{ w }}%"></div>{% endif %}</div>
+        <div class="half pos">{% if e.contribution > 0 %}<div class="bar yes" style="width: {{ w }}%"></div>{% endif %}</div>
+      </div>
+      <div class="cval">{{ '%+.2f'|format(e.contribution) }}<small>{{ (e.share * 100)|round|int }} %</small></div>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="muted small">Chaque barre indique de combien la réponse déplace le score par rapport à un ménage moyen
+    (contribution en log-odds ; le % est la part dans l'ensemble des effets). Les effets s'additionnent :
+    valeur de base {{ '%+.2f'|format(b.base_value) }} + somme des contributions = score du ménage.</p>
+</section>
+
+<section class="two-col">
+  <div class="card">
+    <h2>Données du ménage</h2>
+    <table class="kv">
+      {% for key, label in identity_fields.items() %}
+      <tr><th>{{ label }}</th><td>{{ b[key] or '—' }}</td></tr>
+      {% endfor %}
+      {% for f in features %}
+      <tr><th>{{ f.label }}</th><td>{{ b.features[f.name] }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Votre revue</h2>
+    <form method="post" action="/dashboard/beneficiaires/{{ b.id }}/revision" class="review">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label class="choice">
+        <input type="radio" name="decision" value="approuve" {% if b.statut_revue != 'modifiee' %}checked{% endif %}>
+        <span><strong>J'approuve la décision du modèle</strong>
+          <small>Décision finale : {{ 'Éligible' if b.model_decision else 'Non éligible' }}</small></span>
+      </label>
+      <label class="choice">
+        <input type="radio" name="decision" value="desapprouve" {% if b.statut_revue == 'modifiee' %}checked{% endif %}>
+        <span><strong>Je désapprouve la décision du modèle</strong>
+          <small>Décision finale : {{ 'Non éligible' if b.model_decision else 'Éligible' }}</small></span>
+      </label>
+      <label class="field">Commentaire <small>(obligatoire en cas de désaccord)</small>
+        <textarea name="commentaire" rows="3" placeholder="Ex. visite de vérification : ménage hébergeant 3 orphelins non déclarés"></textarea>
+      </label>
+      <button class="btn">Enregistrer la revue</button>
+    </form>
+
+    <h3 class="mt">Historique</h3>
+    {% if b.reviews %}
+    <ul class="history">
+      {% for r in b.reviews %}
+      <li>
+        <span class="tag {{ 'ok' if r.action == 'approuve' else ('alt' if r.action == 'desapprouve' else '') }}">{{ {'approuve': 'approuvé', 'desapprouve': 'désapprouvé', 'reinitialise': 'réévalué'}[r.action] }}</span>
+        <strong>{{ r.reviewer }}</strong> · {{ r.created_at.strftime('%d/%m/%Y %H:%M') }}
+        → {{ 'Éligible' if r.decision_apres else 'Non éligible' }}
+        {% if r.commentaire %}<p>« {{ r.commentaire }} »</p>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="muted small">Aucune revue pour l'instant.</p>{% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Modèle — Ciblage{% endblock %}
+{% block content %}
+{% set t = m.test %}
+{% set d = m.test_sans_traitement %}
+{% set fkey = 'f%g'|format(m.beta) %}
+<div class="page-head">
+  <div>
+    <h1>Le modèle</h1>
+    <p class="muted">{{ m.modele|replace('_', ' ') }} · version {{ m.version }} · entraîné sur {{ m.n_entrainement }} ménages
+      ({{ m.taux_eligibles_entrainement|pct }} d'éligibles : classes déséquilibrées)</p>
+  </div>
+</div>
+
+<section class="kpis">
+  <div class="kpi"><span>Rappel (éligibles retrouvés)</span><strong>{{ t.rappel|pct }}</strong></div>
+  <div class="kpi"><span>Précision</span><strong>{{ t.precision|pct }}</strong></div>
+  <div class="kpi"><span>F{{ '%g'|format(m.beta) }}</span><strong>{{ '%.3f'|format(t[fkey]) }}</strong></div>
+  <div class="kpi"><span>PR-AUC</span><strong>{{ '%.3f'|format(t.pr_auc) }}</strong></div>
+  <div class="kpi"><span>Balanced accuracy</span><strong>{{ t.balanced_accuracy|pct }}</strong></div>
+  <div class="kpi"><span>Seuil de décision</span><strong>{{ '%.2f'|format(m.seuil) }}</strong></div>
+</section>
+
+<section class="two-col">
+  <div class="card">
+    <h2>Matrice de confusion (jeu de test)</h2>
+    <table class="confusion">
+      <tr><th></th><th>Prédit non éligible</th><th>Prédit éligible</th></tr>
+      <tr><th>Réellement non éligible</th><td class="good">{{ t.matrice_confusion.vn }}</td><td class="bad">{{ t.matrice_confusion.fp }}<small>erreurs d'inclusion</small></td></tr>
+      <tr><th>Réellement éligible</th><td class="bad strong">{{ t.matrice_confusion.fn }}<small>erreurs d'exclusion</small></td><td class="good">{{ t.matrice_confusion.vp }}</td></tr>
+    </table>
+    <p class="small">Le seuil est choisi pour maximiser le F{{ '%g'|format(m.beta) }}, qui donne deux fois plus de poids au rappel :
+      exclure un ménage vulnérable est plus grave qu'en inclure un de trop, qui pourra être corrigé à la revue.</p>
+    {% if m.zone_grise %}
+    <p class="small"><strong>Zone grise</strong> (score entre {{ '%.2f'|format([m.seuil - m.zone_grise.marge, 0]|max) }}
+      et {{ '%.2f'|format([m.seuil + m.zone_grise.marge, 1]|min) }}) : elle contient {{ m.zone_grise.part_menages|pct }} des ménages
+      mais {{ m.zone_grise.part_erreurs|pct }} des erreurs du modèle. Ces ménages sont signalés pour être revus en priorité.</p>
+    {% endif %}
+  </div>
+  <div class="card">
+    <h2>Effet du traitement du déséquilibre</h2>
+    <table class="list compact">
+      <thead><tr><th>Sur le test</th><th class="num">Sans traitement<br><small>non pondéré, seuil 0,50</small></th>
+        <th class="num">Modèle retenu<br><small>pondéré, seuil {{ '%.2f'|format(m.seuil) }}</small></th></tr></thead>
+      <tbody>
+        <tr><td>Rappel</td><td class="num">{{ d.rappel|pct }}</td><td class="num">{{ t.rappel|pct }}</td></tr>
+        <tr><td>Précision</td><td class="num">{{ d.precision|pct }}</td><td class="num">{{ t.precision|pct }}</td></tr>
+        <tr><td>F{{ '%g'|format(m.beta) }}</td><td class="num">{{ '%.3f'|format(d[fkey]) }}</td><td class="num">{{ '%.3f'|format(t[fkey]) }}</td></tr>
+        <tr><td>Éligibles exclus</td><td class="num">{{ d.matrice_confusion.fn }}</td><td class="num">{{ t.matrice_confusion.fn }}</td></tr>
+      </tbody>
+    </table>
+    <h3 class="mt">Modèles comparés (validation)</h3>
+    <table class="list compact">
+      <thead><tr><th>Modèle</th><th class="num">Seuil</th><th class="num">PR-AUC</th><th class="num">Rappel</th><th class="num">F{{ '%g'|format(m.beta) }}</th></tr></thead>
+      <tbody>
+      {% for r in m.validation_comparaison %}
+        <tr class="{{ 'chosen' if r.modele == m.modele }}"><td>{{ r.modele|replace('_', ' ') }}</td><td class="num">{{ '%.2f'|format(r.seuil) }}</td>
+          <td class="num">{{ '%.4f'|format(r.pr_auc) }}</td><td class="num">{{ r.rappel|pct }}</td><td class="num">{{ '%.4f'|format(r[fkey]) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Importance globale des critères</h2>
+  <p class="muted small">Effet moyen (|contribution|) de chaque question sur la décision, mesuré sur le jeu de test.</p>
+  <div class="imp">
+    {% for r in m.importance_globale %}
+    <div class="irow">
+      <span>{{ SHORT_LABELS[r.feature] }}</span>
+      <div class="ibar"><div style="width: {{ (r.importance / max_imp * 100)|round(1) }}%"></div></div>
+      <span class="num">{{ '%.2f'|format(r.importance) }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
