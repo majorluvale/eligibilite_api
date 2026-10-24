@@ -1,5 +1,7 @@
 import base64
 import copy
+import json
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -15,11 +17,19 @@ os.environ["SECRET_KEY"] = "test-key"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.main import app  # noqa: E402
-from app.schema import FEATURES  # noqa: E402
+from app.main import EXEMPLE_MENAGE, app  # noqa: E402
+from app.schema import FEATURE_NAMES, FEATURES  # noqa: E402
 from app.security import csrf_token  # noqa: E402
+from kobo.build_xlsform import GROUPS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
+GROUPE = {name: groupe for groupe, _, names in GROUPS for name in names}
+
+
+def kobo(reponses: dict) -> dict:
+    """Réponses -> questions préfixées par leur groupe, valeurs en texte, comme un REST Service Kobo."""
+    return {f"{GROUPE[k]}/{k}": str(v) for k, v in reponses.items()}
+
 
 # Soumission telle qu'envoyée par un REST Service KoboToolbox (groupes préfixés, valeurs en texte)
 KOBO_PAYLOAD = {
@@ -36,34 +46,29 @@ KOBO_PAYLOAD = {
     "identification/nom_chef_menage": "Amani Kahindo",
     "identification/telephone": "+243 990 000 000",
     "identification/gps": "-1.2 29.4 1500 5",
-    "profil/localite": "Kibirizi",
-    "profil/statut_menage": "deplace",
-    "profil/duree_deplacement_mois": "1",
-    "profil/sexe_chef_menage": "femme",
-    "profil/age_chef_menage": "34",
-    "profil/taille_menage": "8",
-    "profil/enfants_moins_5": "3",
-    "vulnerabilites/membre_handicap": "non",
-    "vulnerabilites/membre_maladie_chronique": "non",
-    "vulnerabilites/femme_enceinte_allaitante": "oui",
-    "vulnerabilites/enfant_non_accompagne_heberge": "non",
-    "logement/type_logement": "abri_fortune",
-    "logement/articles_essentiels": "1",
-    "logement/possede_betail": "non",
-    "alimentation_revenus/repas_par_jour": "1",
-    "alimentation_revenus/jours_sans_nourriture_7j": "3",
-    "alimentation_revenus/source_revenu": "travail_journalier",
-    "assistance/assistance_3_derniers_mois": "non",
+    **kobo(EXEMPLE_MENAGE),
     "meta/instanceID": "uuid:b1f0c6a2-0000-4c3b-9d1e-123456789abc",
 }
 
 NON_VULNERABLE = {
-    "localite": "Rutshuru", "statut_menage": "resident", "sexe_chef_menage": "homme", "age_chef_menage": 40,
-    "taille_menage": 3, "enfants_moins_5": 0, "membre_handicap": "non", "membre_maladie_chronique": "non",
-    "femme_enceinte_allaitante": "non", "enfant_non_accompagne_heberge": "non", "type_logement": "maison_correcte",
-    "articles_essentiels": 5, "repas_par_jour": 3, "jours_sans_nourriture_7j": 0, "source_revenu": "petit_commerce",
-    "possede_betail": "oui", "assistance_3_derniers_mois": "non",
+    **EXEMPLE_MENAGE,
+    "localite": "Rutshuru", "statut_menage": "resident", "duree_deplacement_mois": None, "nombre_deplacements_12m": None,
+    "sexe_chef_menage": "homme", "age_chef_menage": 40, "etat_civil_chef": "marie", "instruction_chef": "secondaire",
+    "taille_menage": 4, "enfants_moins_5": 1, "enfants_5_17": 1, "enfants_non_scolarises": 0, "femme_enceinte_allaitante": "non",
+    "type_logement": "maison_correcte", "statut_occupation": "proprietaire", "nombre_pieces": 3, "articles_essentiels": 5,
+    "possede_betail": "oui", "acces_terre_cultivable": "oui", "toit_etanche": "oui", "source_eclairage": "solaire",
+    "possede_telephone": "oui", "source_eau": "robinet", "temps_collecte_eau_min": 10, "type_latrine": "privee",
+    "savon_disponible": "oui", "enfant_malade_2_semaines": "non", "acces_soins": "oui", "vaccination_enfants_a_jour": "oui",
+    "jours_cereales": 7, "jours_legumineuses": 5, "jours_lait": 2, "jours_viande_poisson": 3, "jours_legumes": 6,
+    "jours_fruits": 3, "jours_huile": 7, "jours_sucre": 5, "stock_nourriture_jours": 30, "repas_par_jour": 3,
+    "jours_sans_nourriture_7j": 0, "rcsi_aliments_moins_chers": 0, "rcsi_emprunt_nourriture": 0, "rcsi_reduction_portions": 0,
+    "rcsi_adultes_pour_enfants": 0, "rcsi_moins_de_repas": 0, "lcs_emprunt_argent": "non", "lcs_vente_biens_menagers": "non",
+    "lcs_reduction_depenses_sante": "non", "lcs_retrait_enfants_ecole": "non", "source_revenu": "petit_commerce",
+    "membres_avec_revenu": 2, "perte_revenu_6_mois": "non", "revenu_30j_usd": 220, "part_depenses_alimentation_pct": 40,
+    "dette_usd": 0, "epargne_disponible": "oui", "incident_securite_3_mois": "non", "biens_perdus_crise": "non",
+    "documents_identite": "oui", "restriction_mouvements": "non",
 }
+NON_VULNERABLE = {k: v for k, v in NON_VULNERABLE.items() if v is not None}
 
 
 def auth(user="agent", pw="secret"):
@@ -106,12 +111,15 @@ def test_questions_conditionnelles_et_coherence(client):
     # déplacé sans durée de déplacement : refusé
     sans_duree = {k: v for k, v in KOBO_PAYLOAD.items() if k != "profil/duree_deplacement_mois"}
     assert "duree_deplacement_mois" in client.post("/api/predict", json=sans_duree).json()["detail"]
-    # résident : la durée n'est pas demandée ; assistance reçue : le type devient obligatoire
+    # résident : durée et nombre de déplacements non demandés ; assistance reçue : le type devient obligatoire
+    assert client.post("/api/predict", json=NON_VULNERABLE).status_code == 200
     resident = {**NON_VULNERABLE, "assistance_3_derniers_mois": "oui"}
     assert "type_assistance_recue" in client.post("/api/predict", json=resident).json()["detail"]
     assert client.post("/api/predict", json={**resident, "type_assistance_recue": "abri"}).status_code == 200
-    # plus d'enfants de moins de 5 ans que de membres : refusé
-    assert "enfants_moins_5" in client.post("/api/predict", json={**NON_VULNERABLE, "enfants_moins_5": 3}).json()["detail"]
+    # plus d'enfants et de personnes âgées que de membres, plus d'enfants non scolarisés que d'enfants : refusé
+    trop = client.post("/api/predict", json={**NON_VULNERABLE, "enfants_5_17": 4}).json()["detail"]
+    assert "personnes_60_plus" in trop
+    assert "enfants_non_scolarises" in client.post("/api/predict", json={**NON_VULNERABLE, "enfants_non_scolarises": 2}).json()["detail"]
 
 
 def test_webhook_ignores_refused_consent(client):
@@ -119,21 +127,24 @@ def test_webhook_ignores_refused_consent(client):
     assert r.status_code == 200 and r.json()["ignore"] is True
 
 
-def test_predict_explication_en_points(client):
+def test_predict_explication_additive(client):
     r = client.post("/api/predict", json=NON_VULNERABLE).json()
-    assert r["eligible"] is False and r["points"] < r["seuil_grille"]
-    assert abs(r["base_value"] + sum(e["contribution"] for e in r["explanation"]) - r["points"]) < 0.1
-    assert {e["feature"] for e in r["explanation"]} == {f.name for f in FEATURES if f.modele}
-    assert r["indice_priorite"] == pytest.approx(r["points"], abs=0.05)
+    assert r["eligible"] is False and r["score"] < r["threshold"]
+    # base + somme des contributions = log-odds, et probabilité = sigmoïde(log-odds)
+    assert abs(r["base_value"] + sum(e["contribution"] for e in r["explanation"]) - r["log_odds"]) < 1e-2
+    assert abs(1 / (1 + math.exp(-r["log_odds"])) - r["score"]) < 1e-3
+    assert {e["feature"] for e in r["explanation"]} == set(FEATURE_NAMES)
+    assert abs(sum(t["contribution"] for t in r["themes"]) - sum(e["contribution"] for e in r["explanation"])) < 1e-2
+    assert r["indice_priorite"] == pytest.approx(r["log_odds"], abs=1e-3)
 
 
-def test_exception_de_la_grille(client):
-    # ménage très vulnérable mais avec un salaire régulier : exclu par la grille de l'ONG
-    salarie = {k.split("/")[-1]: v for k, v in KOBO_PAYLOAD.items() if "/" in k}
-    salarie["source_revenu"] = "salaire_regulier"
-    r = client.post("/api/predict", json=salarie).json()
-    assert r["eligible"] is False and r["points"] >= r["seuil_grille"]
-    assert r["exception"]["type"] == "exclusion" and "Source de revenu" in r["exception"]["facteur"]
+def test_pas_de_grille_dans_le_modele(client):
+    meta = client.get("/api/modele").json()
+    assert "seuil_grille" not in meta and "score_grille_excel" not in meta["variables"]
+    assert len(meta["variables"]) > 70
+    # objectif du projet : au moins 95 % sur toutes les métriques du jeu de test
+    for m in ["accuracy", "f1", "rappel", "precision"]:
+        assert meta["test"][m] >= 0.95, m
 
 
 def test_human_override_and_audit_trail(client):
@@ -150,7 +161,7 @@ def test_human_override_and_audit_trail(client):
 
 def test_kobo_edit_resets_review(client):
     edited = copy.deepcopy(KOBO_PAYLOAD)
-    edited["alimentation_revenus/repas_par_jour"] = "3"
+    edited["alimentation/repas_par_jour"] = "3"
     client.post("/api/kobo/webhook?token=tok123", json=edited)
     d = client.get("/api/beneficiaires", headers=auth()).json()[0]
     assert d["statut_revue"] == "en_attente"
@@ -164,7 +175,9 @@ def test_dashboard_pages_and_csrf(client):
     ben_id = client.get("/api/beneficiaires", headers=auth()).json()[0]["id"]
     detail = client.get(f"/dashboard/beneficiaires/{ben_id}", headers=auth())
     assert detail.status_code == 200 and "Pourquoi le modèle" in detail.text and "Abri de fortune" in detail.text
-    assert client.get("/dashboard/modele", headers=auth()).status_code == 200
+    assert "Par thème du questionnaire" in detail.text
+    modele = client.get("/dashboard/modele", headers=auth())
+    assert modele.status_code == 200 and "Grille Excel" in modele.text
     url = f"/dashboard/beneficiaires/{ben_id}/revision"
     assert client.post(url, data={"decision": "approuve"}, headers=auth()).status_code == 403
     r = client.post(url, data={"decision": "approuve", "csrf": csrf_token("agent")}, headers=auth(),
@@ -191,3 +204,9 @@ def test_xlsform_matches_schema(tmp_path, monkeypatch):
             assert choices[qtype.split()[1]] == set(f.choices), f.name
         if f.relevant:
             assert f"${{{f.relevant[0]}}}" in rows[f.name][header.index("relevant")], f.name
+    assert "${taille_menage}" in rows["personnes_60_plus"][header.index("constraint")]
+
+
+def test_metadata_versionnee_coherente():
+    meta = json.loads((ROOT / "model" / "metadata.json").read_text(encoding="utf-8"))
+    assert meta["variables"] == FEATURE_NAMES

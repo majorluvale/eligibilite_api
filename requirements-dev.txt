@@ -3,7 +3,9 @@
 openpyxl==3.1.5
 pyxform==4.5.0
 pytest==9.1.1
-xgboost==3.4.1
+plotly==7.1.0
+seaborn==0.13.2
+shap==0.54.1
 imbalanced-learn==0.14.2
 matplotlib==3.11.2
 nbconvert==7.17.2

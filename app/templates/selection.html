@@ -8,7 +8,7 @@
     <h1>{{ sel.nom }}</h1>
     <p class="muted">Créée par {{ sel.created_by }} le {{ sel.created_at.strftime('%d/%m/%Y à %H:%M') }}
       · {{ 'répartition proportionnelle par zone' if sel.repartition == 'proportionnelle_zone' else 'les plus prioritaires, toutes zones confondues' }}
-      · {{ 'ménages non revus inclus' if sel.inclure_non_revus else 'ménages revus uniquement' }} · classement : {{ "score de l'agent prédit (points)" if sel.methode_priorite == "score_predit" else "indice du modèle de décision" }} · modèle {{ sel.model_version }}</p>
+      · {{ 'ménages non revus inclus' if sel.inclure_non_revus else 'ménages revus uniquement' }} · classement : {{ "score de grille prédit (ancien modèle)" if sel.methode_priorite == "score_predit" else "indice de priorité du modèle" }} · modèle {{ sel.model_version }}</p>
   </div>
   <div class="actions"><a class="btn" href="/dashboard/selections/{{ sel.id }}/export.csv">Exporter la liste (CSV)</a></div>
 </div>

@@ -19,27 +19,26 @@ from openpyxl.utils import get_column_letter
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app.schema import FEATURES_BY_KOBO  # noqa: E402
+from app.schema import COHERENCE, FEATURES, FEATURES_BY_KOBO  # noqa: E402
 
 OUT = ROOT / "kobo" / "formulaire_ciblage_menages.xlsx"
 SURVEY_COLS = ["type", "name", "label", "hint", "required", "constraint", "constraint_message",
                "relevant", "appearance"]
 
-# Ordre et regroupement des questions dans le formulaire (toutes les questions de app/schema.py)
-GROUPS = [
-    ("profil", "Profil du ménage",
-     ["localite", "statut_menage", "duree_deplacement_mois", "sexe_chef_menage", "age_chef_menage",
-      "taille_menage", "enfants_moins_5"]),
-    ("vulnerabilites", "Vulnérabilités",
-     ["membre_handicap", "membre_maladie_chronique", "femme_enceinte_allaitante", "enfant_non_accompagne_heberge"]),
-    ("logement", "Logement et biens", ["type_logement", "articles_essentiels", "possede_betail"]),
-    ("alimentation_revenus", "Alimentation et revenus", ["repas_par_jour", "jours_sans_nourriture_7j", "source_revenu"]),
-    ("assistance", "Assistance reçue", ["assistance_3_derniers_mois", "type_assistance_recue"]),
-]
+# Groupes du formulaire : un groupe par thème de app/schema.py, dans l'ordre du schéma
+NOMS_GROUPES = {"Profil": "profil", "Composition": "composition", "Logement et biens": "logement",
+                "Eau et hygiène": "eau_hygiene", "Santé et nutrition": "sante", "Alimentation": "alimentation",
+                "Stratégies d'adaptation": "adaptation", "Moyens d'existence": "moyens_existence",
+                "Protection": "protection", "Assistance": "assistance"}
+GROUPS = []
+for _f in FEATURES:
+    if not GROUPS or GROUPS[-1][1] != _f.theme:
+        GROUPS.append((NOMS_GROUPES[_f.theme], _f.theme, []))
+    GROUPS[-1][2].append(_f.name)
 # Questions numériques présentées comme un choix (libellés plus clairs pour l'enquêteur)
 AS_CHOICES = {"repas_par_jour": {"1": "1 repas ou moins", "2": "2 repas", "3": "3 repas ou plus"}}
 # Contraintes entre questions, vérifiées par Kobo dès la saisie (l'API les vérifie aussi)
-CONTRAINTES = {"enfants_moins_5": (". < ${taille_menage}", "Doit être inférieur à la taille du ménage (le chef de ménage en fait partie)")}
+CONTRAINTES = {question: (contrainte, message[0].upper() + message[1:]) for question, contrainte, _, message in COHERENCE}
 CONSENT = "${consentement} = 'oui'"
 
 

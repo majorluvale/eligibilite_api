@@ -84,9 +84,9 @@ def apply_review(session: Session, ben: Beneficiary, reviewer: str, approuve: bo
 def priorites(menages: list[Beneficiary]) -> tuple[list[float], str]:
     """Indice de priorité de chaque ménage, calculé en un seul passage par le modèle.
 
-    Méthode principale : le score de l'agent (points de sa grille Excel) prédit par le modèle de
-    priorité. On ne classe pas par probabilité d'éligibilité : elle mesure la certitude du modèle,
-    pas l'intensité des besoins, et vaut presque 1 pour beaucoup de ménages.
+    L'indice est le log-odds du modèle : la somme des effets de toutes les réponses du ménage
+    (voir « Pourquoi le modèle a décidé ainsi »). Contrairement à la probabilité, il ne plafonne
+    pas à 1 : il continue de séparer les ménages très vulnérables entre eux.
     """
     model = load_model(get_settings().model_dir)
     valeurs = model.priorities(prepare([b.features for b in menages]))

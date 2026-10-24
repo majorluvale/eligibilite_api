@@ -1,19 +1,20 @@
-"""Entraînement reproductible des modèles déployés (données v5 : grille de points d'une ONG).
+"""Entraînement reproductible du modèle déployé (données v6 : enquête ménage, vérification approfondie).
 
 Usage :
-    python -m training.train                       # données v5 (générées si absentes)
-    python -m training.train --data mes_listes.csv --seuil-grille 40
+    python -m training.train                       # données v6 (générées si absentes)
+    python -m training.train --data mes_menages.csv
 
-Le fichier doit contenir les questions de app/schema.py, la décision de l'agent
-(`eligible`, 0/1) et le score qu'il a calculé avec sa grille (`score_excel`).
-Voir notebooks/ciblage_avec_ml_v5.ipynb pour l'analyse complète.
+Le fichier doit contenir les questions de app/schema.py et la décision de la vérification
+(`eligible`, 0/1). La grille Excel de l'ONG n'est pas utilisée pour entraîner le modèle :
+si les colonnes `decision_grille_excel` / `score_grille_excel` sont présentes, elles servent
+seulement de point de comparaison.
 
-Deux modèles :
-1. modèle de score : prédit `score_excel` (régression LightGBM) ;
-2. modèle de décision : prédit `eligible` à partir des réponses et du score prédit
-   (stacking ; le score du train est calculé hors-pli pour éviter toute fuite).
-Seuil de décision : meilleur F1 parmi les seuils qui garantissent une précision >= 98 %
-sur la validation.
+Même préparation et mêmes paramètres que notebooks/ciblage_avec_ml_v6.ipynb :
+- questions conditionnelles non posées -> -1 (nombres) ou "non_applicable" (choix) ;
+- choix codés comme le LabelEncoder (ordre alphabétique) ;
+- découpage 80 % entraînement / 10 % validation / 10 % test, stratifié, random_state=42 ;
+- XGBoost avec les paramètres trouvés par GridSearchCV dans le notebook, seuil 0,5.
+Pas de normalisation : elle ne change rien pour un modèle à base d'arbres.
 """
 from __future__ import annotations
 
@@ -26,153 +27,126 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-from lightgbm import LGBMClassifier, LGBMRegressor
-from scipy.stats import spearmanr
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (accuracy_score, average_precision_score, confusion_matrix, f1_score,
-                             mean_absolute_error, precision_score, recall_score)
-from sklearn.model_selection import KFold, cross_val_predict, train_test_split
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.metrics import (accuracy_score, average_precision_score, confusion_matrix, f1_score, precision_score,
+                             recall_score)
+from sklearn.model_selection import cross_validate, train_test_split
+from sklearn.preprocessing import RobustScaler
+from xgboost import XGBClassifier
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "notebooks"))
 
-from app.ml import SCORE, EligibilityModel, prepare  # noqa: E402
-from app.schema import CATEGORICAL, FEATURE_NAMES, NUMERIC  # noqa: E402
+from app.ml import EligibilityModel, encoder, prepare  # noqa: E402
+from app.schema import CATEGORICAL, FEATURE_NAMES, FEATURES_BY_NAME, THEMES  # noqa: E402
 
-DONNEES_V5 = ROOT / "notebooks" / "data" / "ciblage_v5.csv"
+DONNEES_V6 = ROOT / "notebooks" / "data" / "ciblage_v6.csv"
 SEED = 42
-PRECISION_MIN = 0.98
-
-
-def preprocesseur(num=NUMERIC) -> ColumnTransformer:
-    return ColumnTransformer([
-        ("cat", Pipeline([("vide", SimpleImputer(strategy="constant", fill_value="non_applicable")),
-                          ("oh", OneHotEncoder(handle_unknown="ignore", sparse_output=False))]), CATEGORICAL),
-        ("num", SimpleImputer(strategy="constant", fill_value=0, add_indicator=True), list(num)),
-    ])
-
-
-def modele_score() -> Pipeline:
-    return Pipeline([("pre", preprocesseur()), ("reg", LGBMRegressor(n_estimators=1000, learning_rate=0.05, num_leaves=31,
-                                                                      random_state=SEED, verbose=-1))])
-
-
-def modele_decision(avec_score=True) -> Pipeline:
-    num = NUMERIC + [SCORE] if avec_score else NUMERIC
-    return Pipeline([("pre", preprocesseur(num)), ("clf", LGBMClassifier(n_estimators=800, learning_rate=0.05, num_leaves=31,
-                                                                         random_state=SEED, verbose=-1))])
+SEUIL = 0.5
+ZONE_GRISE = (0.2, 0.8)
+XGB_PARAMS = dict(n_estimators=3000, max_depth=3, learning_rate=0.05, subsample=0.8, colsample_bytree=0.8,
+                  random_state=SEED)
 
 
 def charger(chemin: Path) -> pd.DataFrame:
-    if not chemin.exists() and chemin == DONNEES_V5:
-        import generateur_ciblage_v5 as gen
-        print(f"{chemin} absent : génération des données v5…")
+    if not chemin.exists() and chemin == DONNEES_V6:
+        import generateur_ciblage_v6 as gen
+        print(f"{chemin} absent : génération des données v6…")
         gen.construire_base(gen.generer(), chemin.with_suffix(".db"), chemin)
     return pd.read_csv(chemin, encoding="utf-8-sig", keep_default_na=False, na_values=[""])
 
 
-def choisir_seuil(y, p) -> float:
-    grille = np.round(np.arange(0.05, 0.96, 0.01), 2)
-    prec = np.array([precision_score(y, p >= t, zero_division=0) for t in grille])
-    f1 = np.array([f1_score(y, p >= t) for t in grille])
-    ok = prec >= PRECISION_MIN
-    return float(grille[ok][np.argmax(f1[ok])] if ok.any() else grille[np.argmax(f1)])
-
-
-def mesures(y, p, seuil) -> dict:
-    pred = p >= seuil
+def mesures(y, pred, proba=None) -> dict:
     vn, fp, fn, vp = confusion_matrix(y, pred, labels=[0, 1]).ravel()
-    return {"seuil": seuil, "precision": round(precision_score(y, pred), 4), "rappel": round(recall_score(y, pred), 4),
-            "f1": round(f1_score(y, pred), 4), "accuracy": round(accuracy_score(y, pred), 4),
-            "pr_auc": round(average_precision_score(y, p), 4),
-            "matrice_confusion": {"vn": int(vn), "fp": int(fp), "fn": int(fn), "vp": int(vp)}}
-
-
-def recouvrement_top(priorite, reference, part=0.30) -> float:
-    """Part de la liste de l'agent (top `part` des éligibles par score) retrouvée par un autre classement."""
-    n = max(1, int(len(reference) * part))
-    return len(set(np.argsort(-priorite, kind="stable")[:n]) & set(np.argsort(-reference, kind="stable")[:n])) / n
+    m = {"precision": round(precision_score(y, pred), 4), "rappel": round(recall_score(y, pred), 4),
+         "f1": round(f1_score(y, pred), 4), "accuracy": round(accuracy_score(y, pred), 4)}
+    if proba is not None:
+        m["pr_auc"] = round(average_precision_score(y, proba), 4)
+    m["matrice_confusion"] = {"vn": int(vn), "fp": int(fp), "fn": int(fn), "vp": int(vp)}
+    return m
 
 
 def main(argv=None) -> dict:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", type=Path, default=DONNEES_V5)
+    ap.add_argument("--data", type=Path, default=DONNEES_V6)
     ap.add_argument("--out", type=Path, default=ROOT / "model")
-    ap.add_argument("--seuil-grille", type=float, default=40, help="seuil d'éligibilité de la grille de l'ONG (points)")
-    ap.add_argument("--marge-points", type=float, default=3, help="zone grise : score à moins de N points du seuil")
+    ap.add_argument("--sans-cv", action="store_true", help="ne pas faire la validation croisée (plus rapide)")
     args = ap.parse_args(argv)
 
     df = charger(args.data)
-    X, y, s = prepare(df), df["eligible"].to_numpy(), df["score_excel"].to_numpy(dtype=float)
+    X_brut, y = prepare(df), df["eligible"].to_numpy()
+    # = LabelEncoder().classes_ ; les choix du formulaire jamais observés sont ajoutés pour que l'API les accepte
+    encodeurs = {c: sorted(set(X_brut[c].astype(str)) | set(FEATURES_BY_NAME[c].choices)) for c in CATEGORICAL}
+    X = encoder(X_brut, encodeurs)
     idx = np.arange(len(df))
-    i_tr, i_tmp = train_test_split(idx, test_size=0.30, stratify=y, random_state=SEED)
-    i_va, i_te = train_test_split(i_tmp, test_size=0.50, stratify=y[i_tmp], random_state=SEED)
-    X_tr, X_va, X_te = X.iloc[i_tr], X.iloc[i_va], X.iloc[i_te]
-    print(f"Données : {len(df):,} ménages, {y.mean():.1%} éligibles | train {len(i_tr):,} / val {len(i_va):,} / test {len(i_te):,}")
+    i_tr, i_vt = train_test_split(idx, train_size=0.8, stratify=y, random_state=SEED)
+    i_va, i_te = train_test_split(i_vt, train_size=0.5, stratify=y[i_vt], random_state=SEED)
+    print(f"Données : {len(df):,} ménages, {len(FEATURE_NAMES)} variables, {y.mean():.1%} éligibles "
+          f"| train {len(i_tr):,} / val {len(i_va):,} / test {len(i_te):,}")
 
-    # 1. modèle de score, puis score hors-pli pour entraîner la décision sans fuite
-    score_pipe = modele_score().fit(X_tr, s[i_tr])
-    oof = cross_val_predict(modele_score(), X_tr, s[i_tr], cv=KFold(5, shuffle=True, random_state=SEED))
-    decision_pipe = modele_decision().fit(X_tr.assign(**{SCORE: oof}), y[i_tr])
-    artifact = {"score_pipeline": score_pipe, "decision_pipeline": decision_pipe, "threshold": 0.5,
-                "metadata": {"version": "", "seuil_grille": args.seuil_grille, "zone_grise": {"marge_points": args.marge_points}}}
-    modele = EligibilityModel(artifact)
+    modele = XGBClassifier(**XGB_PARAMS).fit(X[i_tr], y[i_tr])
+    artifact = {"modele": modele, "encodeurs": encodeurs, "seuil": SEUIL,
+                "metadata": {"version": "", "zone_grise": {"probabilite": list(ZONE_GRISE)}}}
+    em = EligibilityModel(artifact)
 
-    # comparaison sur la validation (seuil 0,5)
-    lr = Pipeline([("pre", preprocesseur()), ("sc", StandardScaler()), ("clf", LogisticRegression(max_iter=5000))]).fit(X_tr, y[i_tr])
-    direct = modele_decision(avec_score=False).fit(X_tr, y[i_tr])
-    p_va = modele.score(X_va)
-    comparaison = []
-    for nom, p in [("regression_logistique", lr.predict_proba(X_va)[:, 1]), ("lightgbm", direct.predict_proba(X_va)[:, 1]),
-                   ("score_predit_plus_lightgbm", p_va)]:
-        comparaison.append({"modele": nom, **mesures(y[i_va], p, 0.5)})
-        print(f"  {nom:28s} précision={comparaison[-1]['precision']:.4f} rappel={comparaison[-1]['rappel']:.4f}")
+    # comparaison sur la validation : régression logistique, grille Excel (si présente), XGBoost
+    sc = RobustScaler().fit(X[i_tr])
+    lr = LogisticRegression(max_iter=3000).fit(sc.transform(X[i_tr]), y[i_tr])
+    comparaison = [{"modele": "regression_logistique", **mesures(y[i_va], lr.predict(sc.transform(X[i_va])))}]
+    if "decision_grille_excel" in df:
+        comparaison.append({"modele": "grille_excel", **mesures(y[i_va], df["decision_grille_excel"].to_numpy()[i_va])})
+    p_va = modele.predict_proba(X[i_va])[:, 1]
+    comparaison.append({"modele": "xgboost", **mesures(y[i_va], (p_va >= SEUIL).astype(int), p_va)})
+    for r in comparaison:
+        print(f"  validation {r['modele']:22s} accuracy={r['accuracy']:.4f} f1={r['f1']:.4f} "
+              f"précision={r['precision']:.4f} rappel={r['rappel']:.4f}")
 
-    seuil = choisir_seuil(y[i_va], p_va)
-    artifact["threshold"] = seuil
-    p_te = modele.score(X_te)
-    s_te = modele.points(X_te)
-    test = {**mesures(y[i_te], p_te, seuil), "erreur_score_points": round(float(mean_absolute_error(s[i_te], s_te)), 3)}
-    print(f"Seuil {seuil:.2f} — test : {json.dumps(test, ensure_ascii=False)}")
+    p_te = modele.predict_proba(X[i_te])[:, 1]
+    pred_te = (p_te >= SEUIL).astype(int)
+    test = {"seuil": SEUIL, **mesures(y[i_te], pred_te, p_te)}
+    print(f"Test : {json.dumps(test, ensure_ascii=False)}")
 
-    erreurs = (p_te >= seuil) != y[i_te].astype(bool)
-    a_verifier = modele.a_verifier(s_te, p_te)
-    zone_grise = {"marge_points": args.marge_points,
-                  "part_menages": round(float(a_verifier.mean()), 4),
+    validation_croisee = None
+    if not args.sans_cv:
+        cv = cross_validate(XGBClassifier(**XGB_PARAMS), X[i_tr], y[i_tr], cv=5,
+                            scoring={"accuracy": "accuracy", "f1": "f1", "rappel": "recall", "precision": "precision"})
+        validation_croisee = {m: {"moyenne": round(float(cv[f"test_{m}"].mean()), 4), "min": round(float(cv[f"test_{m}"].min()), 4)}
+                              for m in ["accuracy", "f1", "rappel", "precision"]}
+        print(f"Validation croisée (5 parties) : {json.dumps(validation_croisee, ensure_ascii=False)}")
+
+    erreurs = pred_te != y[i_te]
+    a_verifier = em.a_verifier(p_te)
+    zone_grise = {"probabilite": list(ZONE_GRISE), "part_menages": round(float(a_verifier.mean()), 4),
                   "part_erreurs": round(float((a_verifier & erreurs).sum() / max(erreurs.sum(), 1)), 4)}
 
-    accord = (pd.DataFrame({"motif": df["motif_decision"].iloc[i_te].to_numpy(), "ok": ~erreurs})
-              .groupby("motif").ok.agg(["mean", "size"]).reset_index()) if "motif_decision" in df else pd.DataFrame()
+    grille = None
+    if "decision_grille_excel" in df:
+        g = df["decision_grille_excel"].to_numpy()[i_te]
+        oublies, a_tort = (y[i_te] == 1) & (g == 0), (y[i_te] == 0) & (g == 1)
+        grille = {**mesures(y[i_te], g), "eligibles_oublies": int(oublies.sum()),
+                  "oublies_retrouves_par_le_modele": round(float(pred_te[oublies].mean()), 4),
+                  "retenus_a_tort": int(a_tort.sum()), "a_tort_ecartes_par_le_modele": round(float(1 - pred_te[a_tort].mean()), 4)}
 
-    elig = y[i_te] == 1
-    log_odds = decision_pipe.steps[-1][1].predict(
-        decision_pipe.named_steps["pre"].transform(modele._avec_score(X_te[elig])), raw_score=True)
-    priorite = {"methode": "score_predit", "cible": "score_excel",
-                "erreur_moyenne_points": test["erreur_score_points"],
-                "spearman": round(float(spearmanr(s_te[elig], s[i_te][elig]).correlation), 4),
-                "recouvrement_top30_score_predit": round(recouvrement_top(s_te[elig], s[i_te][elig]), 4),
-                "recouvrement_top30_log_odds": round(recouvrement_top(log_odds, s[i_te][elig]), 4)}
-    print(f"Priorité : {json.dumps(priorite, ensure_ascii=False)}")
-
-    contrib, _ = modele.point_contributions(X_te.iloc[:5000])
-    importance = sorted([{"feature": f, "importance": round(float(v), 3)} for f, v in zip(FEATURE_NAMES, np.abs(contrib).mean(0))],
+    contrib, _ = em.contributions(X_brut.iloc[i_te[:5000]])
+    moy = np.abs(contrib).mean(0)
+    importance = sorted([{"feature": f, "theme": THEMES[f], "importance": round(float(v), 4)} for f, v in zip(FEATURE_NAMES, moy)],
                         key=lambda r: r["importance"], reverse=True)
+    themes = pd.Series(moy, index=[THEMES[f] for f in FEATURE_NAMES]).groupby(level=0).sum().sort_values(ascending=False)
 
     metadata = {
         "version": datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"),
-        "modele": "score prédit + LightGBM",
-        "seuil": seuil, "seuil_grille": args.seuil_grille, "precision_minimale": PRECISION_MIN,
-        "taux_eligibles_entrainement": round(float(y.mean()), 4), "n_entrainement": len(i_tr),
-        "donnees": str(args.data.name),
-        "validation_comparaison": comparaison, "test": test,
-        "accord_par_motif": [{"motif": r.motif, "accord": round(float(r["mean"]), 4), "menages": int(r["size"])}
-                             for _, r in accord.iterrows()],
-        "zone_grise": zone_grise, "priorite": priorite, "importance_globale": importance, "variables": FEATURE_NAMES,
+        "modele": "XGBoost",
+        "parametres": {k: v for k, v in XGB_PARAMS.items() if k != "random_state"},
+        "seuil": SEUIL, "taux_eligibles_entrainement": round(float(y.mean()), 4), "n_entrainement": len(i_tr),
+        "n_variables": len(FEATURE_NAMES), "donnees": str(args.data.name),
+        "cible": "décision de la vérification approfondie (la grille Excel n'est pas utilisée)",
+        "validation_comparaison": comparaison, "test": test, "validation_croisee": validation_croisee,
+        "zone_grise": zone_grise, "grille_excel_test": grille,
+        "priorite": {"methode": "log_odds"},
+        "importance_globale": importance,
+        "importance_themes": [{"theme": t, "importance": round(float(v), 4)} for t, v in themes.items()],
+        "variables": FEATURE_NAMES,
     }
     artifact["metadata"] = metadata
     args.out.mkdir(parents=True, exist_ok=True)

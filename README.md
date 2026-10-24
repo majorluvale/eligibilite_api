@@ -3,16 +3,16 @@
 Backend FastAPI qui :
 
 1. **reçoit une copie de chaque soumission KoboToolbox** (REST Service / webhook) ;
-2. **reproduit la décision de l'agent de ciblage** : il estime le score de la grille de l'ONG (en points), puis décide si le ménage est éligible, exceptions de la grille comprises ;
-3. **explique la décision** : points apportés par chaque critère, comme une ligne de la feuille Excel de l'agent ;
+2. **prédit l'éligibilité du ménage** avec un modèle XGBoost entraîné sur les décisions de la **vérification approfondie** (visite à domicile et comité de ciblage), à partir des 72 réponses de l'enquête ménage. La grille Excel de l'ONG, son score et son seuil ne sont **pas** donnés au modèle ;
+3. **explique la décision** : effet de chaque réponse et de chaque thème du questionnaire (contributions SHAP) ;
 4. permet à un·e superviseur·e de **voir les données du ménage et la décision, puis de l'approuver ou de la désapprouver**. Un commentaire est obligatoire en cas de désaccord, et chaque revue est historisée ;
-5. **sélectionne les ménages à servir quand le budget est limité**, par score estimé, au global ou par zone.
+5. **sélectionne les ménages à servir quand le budget est limité**, par indice de priorité du modèle, au global ou par zone.
 
 ```
 KoboCollect ──soumission──▶ KoboToolbox ──REST Service (JSON)──▶ POST /api/kobo/webhook
                                                                      │
                                        schema.py : questions du formulaire = variables du modèle
-                                       modèles   : score en points + décision + explication
+                                       modèle    : XGBoost (72 variables) + explication SHAP
                                                                      ▼
                                      base de données (SQLite / Postgres) ──▶ /dashboard
                                                                                ├─ liste, filtres, zone grise
@@ -22,28 +22,35 @@ KoboCollect ──soumission──▶ KoboToolbox ──REST Service (JSON)─�
                                                                                └─ export CSV
 ```
 
+## Pourquoi un modèle et pas seulement la grille Excel ?
+
+- Dans un scénario simple (une dizaine de questions oui/non), la grille Excel fait le travail.
+- Avec plus de 70 variables, une grille de points additionnés ne peut pas tout combiner, et l'humain peut se tromper. Le modèle cherche lui-même les relations entre les réponses : par exemple, un même revenu ne pèse pas pareil dans un ménage de 3 personnes et dans un ménage de 10 personnes sans réserves de nourriture.
+- Le modèle ne reproduit pas la grille : entraîné à la recopier (version 5), il obtenait des scores très hauts, mais il n'apportait rien de plus qu'Excel. Cette approche a été abandonnée.
+- Le modèle aide à décider à grande échelle, il ne remplace pas la décision : chaque décision reste revue par un superviseur dans le dashboard.
+
 ## Contenu
 
 | Chemin | Rôle |
 |---|---|
-| `app/schema.py` | **Source unique** des questions : nom, libellé, choix, questions conditionnelles |
-| `app/ml.py` | Modèle de score (points) et modèle de décision, explication en points |
+| `app/schema.py` | **Source unique** des questions : nom, libellé, choix, thème, questions conditionnelles, contrôles de cohérence |
+| `app/ml.py` | Modèle XGBoost, prédiction et explication SHAP (par réponse et par thème) |
 | `app/main.py` | Routes API + dashboard |
-| `training/train.py` | Entraînement reproductible des deux modèles, comparaison, choix du seuil |
+| `training/train.py` | Entraînement reproductible (même préparation et mêmes paramètres que le notebook v6) |
 | `model/` | Modèle déployé (`model.joblib`) et métriques (`metadata.json`) |
-| `kobo/build_xlsform.py` | Génère le formulaire Kobo depuis `schema.py` |
+| `kobo/build_xlsform.py` | Génère le formulaire Kobo depuis `schema.py` (un groupe par thème) |
 | `kobo/formulaire_ciblage_menages.xlsx` | **Formulaire à importer dans KoboToolbox** |
 | `scripts/simulate_kobo.py` | Envoie des ménages simulés au webhook (démo) |
 | `tests/` | Tests de l'API, du webhook, de la revue, de la sélection et de la cohérence formulaire ↔ modèle |
-| `notebooks/` | Analyses v3, v4 et v5 : déséquilibre, données MSNA, grille de points d'une ONG et sélection sous budget (voir `notebooks/README.md`) |
+| `notebooks/` | Analyses v3 à v6 ; **v6 = modèle déployé** (voir `notebooks/README.md`) |
 
 ## Sélection sous contrainte budgétaire
 
 Quand il y a plus de ménages éligibles que le budget n'en permet (par exemple 10 000 éligibles et 3 000 places), la page **Sélection** du dashboard classe les éligibles et produit la liste.
 
-- **Score de priorité** : un **second modèle**, le modèle de priorité, apprend à prédire le **score que l'agent calculait avec sa grille Excel** (colonne `score_excel`). Les éligibles sont classés par ce score estimé, en points.
-  - Il retrouve **96,6 %** de la liste qu'aurait produite l'agent pour un budget couvrant 30 % des éligibles, contre 44 % en classant par la certitude du modèle de décision. Voir `notebooks/ciblage_avec_ml_v5.ipynb`.
-  - On ne classe **pas** par probabilité d'éligibilité : elle mesure la certitude du modèle, pas l'intensité des besoins, et elle sature à 1.
+- **Indice de priorité** : le log-odds du modèle, c'est-à-dire la somme des effets de toutes les réponses du ménage (les mêmes que dans « Pourquoi le modèle a décidé ainsi »). Plus il est élevé, plus le profil du ménage ressemble à celui des ménages retenus par la vérification.
+  - On ne classe **pas** par probabilité d'éligibilité : elle plafonne à 100 % pour beaucoup de ménages et ne les départage plus. L'indice continue de les séparer.
+  - La grille Excel n'intervient pas dans ce classement.
 - **Deux modes de répartition** :
   - **globale** : les N ménages les plus prioritaires, toutes zones confondues ;
   - **proportionnelle par zone** : chaque zone reçoit un quota proportionnel à son nombre d'éligibles (méthode du plus fort reste), puis on prend les plus prioritaires dans chaque zone.
@@ -57,29 +64,35 @@ Quand il y a plus de ménages éligibles que le budget n'en permet (par exemple 
 
 ## Le modèle
 
-Il reproduit le processus de ciblage d'une ONG : une grille de points validée localement, des inclusions automatiques et des exclusions, puis la décision de l'agent dans Excel. Analyse complète : `notebooks/ciblage_avec_ml_v5.ipynb`.
+Analyse complète : `notebooks/ciblage_avec_ml_v6.ipynb`. Sept modèles y sont comparés (KNN, régression logistique, SVM, arbre de décision, Random Forest, Gradient Boosting, XGBoost), et **XGBoost est le plus performant**.
 
-Deux modèles LightGBM :
-1. **le modèle de score** estime le score de la grille (erreur moyenne de 0,33 point). Ses contributions TreeSHAP s'additionnent exactement : `score estimé = ménage moyen + somme des points par question`. C'est l'explication affichée dans le dashboard ;
-2. **le modèle de décision** reçoit les réponses et le score estimé (calculé hors-pli à l'entraînement, sans fuite). Il apprend les exceptions de la grille, que le score seul ne capture pas.
+- **Données** : 100 000 ménages simulés, 72 variables de l'enquête ménage (profil, composition, logement, eau et hygiène, santé, consommation alimentaire, stratégies d'adaptation, moyens d'existence, protection, assistance). Pas de GPS ni de données externes.
+- **Cible** : décision de la vérification approfondie (30 % d'éligibles).
+- **Colonnes retirées avant l'entraînement** : identifiants, localité (elle sert seulement à répartir le budget), et la grille de l'agent (`score_grille_excel`, `decision_grille_excel`), comme la colonne `Score_Vuln` de la première version, qui provoquait l'overfitting.
+- **Préparation** : questions conditionnelles non posées → -1 ou `non_applicable`, choix encodés avec LabelEncoder ; découpage 80 / 10 / 10 stratifié.
+- **XGBoost** : 3 000 arbres de profondeur 3, taux d'apprentissage 0,05 (paramètres choisis par GridSearchCV), seuil 0,5.
+- **Explication** : contributions TreeSHAP, qui s'additionnent exactement : `log-odds = ménage moyen + somme des effets des réponses`, et probabilité = sigmoïde(log-odds).
 
-Résultats sur le jeu de test (15 000 ménages, 27 % d'éligibles) :
+Résultats sur le jeu de test (10 000 ménages, mêmes ménages pour les trois méthodes) :
 
-| | Résultat |
-|---|---|
-| Précision (objectif : au moins 98 %) | **99,7 %** |
-| Rappel | **98,2 %** |
-| Accord sur les exceptions (exclusions, inclusions automatiques) | **100 %** |
-| Zone grise (score à 3 points ou moins du seuil, ou modèle hésitant) | 14 % des ménages, **100 % des erreurs** |
-| Liste sous budget retrouvée (30 % des éligibles) | **96,6 %** |
+| | Accuracy | F1 | Rappel | Précision |
+|---|---|---|---|---|
+| Grille Excel de l'agent (seuil 40 points) | 78,8 % | 62,3 % | 58,5 % | 66,8 % |
+| Régression logistique (validation) | 94,9 % | 91,4 % | 91,2 % | 91,6 % |
+| **XGBoost (déployé)** | **98,1 %** | **96,9 %** | **96,2 %** | **97,6 %** |
 
-Le seuil de décision est le meilleur F1 parmi les seuils qui garantissent au moins 98 % de précision sur la validation. Les données sont simulées et sans bruit : sur de vraies décisions d'agents, qui contiennent du jugement, les scores seront plus bas, et la revue humaine prend tout son sens.
+- Validation croisée en 5 parties : toutes les métriques restent au-dessus de 95 % sur chaque partie (voir `model/metadata.json` et le notebook).
+- Sur les 1 246 ménages éligibles que la grille Excel oublie, le modèle en retrouve **93,7 %**. Sur les 873 ménages que la grille retient à tort, il en écarte **96,6 %**.
+- **Zone grise** (probabilité entre 20 % et 80 %) : 6,9 % des ménages, mais 87,7 % des erreurs. Ces ménages sont signalés pour être revus en priorité.
+- Les thèmes qui pèsent le plus sont l'alimentation, les moyens d'existence et les stratégies d'adaptation. Selon les valeurs SHAP, les questions qui pèsent le plus sont le revenu, la taille du ménage et les réserves de nourriture, ce qui correspond au revenu par personne, une variable qui ne lui a pas été donnée.
 
-Ré-entraîner (les données v5 sont générées automatiquement si elles sont absentes) :
+Les données sont simulées : sur de vraies décisions de vérification, qui contiennent plus de jugement, les scores seront plus bas, et la revue humaine prend tout son sens.
+
+Ré-entraîner (les données v6 sont générées automatiquement si elles sont absentes) :
 
 ```bash
-python -m training.train
-python -m training.train --data mes_listes.csv --seuil-grille 40   # vos propres listes : questions de schema.py + eligible + score_excel
+python -m training.train                          # données v6, avec validation croisée (quelques minutes)
+python -m training.train --data mes_menages.csv   # vos propres données : questions de schema.py + eligible (0/1)
 ```
 
 ## Lancer en local
@@ -101,6 +114,8 @@ uvicorn app.main:app --reload
 
 1. **Importer le formulaire** : sur https://kf.kobotoolbox.org (ou `eu.kobotoolbox.org`), cliquer sur *Nouveau → Importer un XLSForm* → `kobo/formulaire_ciblage_menages.xlsx` → *Déployer*.
    - **Mettre à jour un projet existant** : ouvrir le projet, puis *Formulaire → ⋯ → Remplacer le formulaire* → `kobo/formulaire_ciblage_menages.xlsx` → *Redéployer*. Le REST Service est conservé.
+   - Le formulaire compte 73 questions (72 pour le modèle, plus la localité) réparties en 10 groupes, un par thème. Les questions conditionnelles (durée et nombre de déplacements, type d'assistance) et les contrôles de cohérence (enfants et personnes âgées ≤ taille du ménage, enfants non scolarisés ≤ enfants de 5 à 17 ans) sont vérifiés par Kobo dès la saisie, et à nouveau par l'API.
+   - **Attention** : le nouveau formulaire n'est pas compatible avec l'ancien (questions différentes). Les ménages déjà évalués avec l'ancien formulaire restent consultables, mais ne sont pas repris dans les sélections.
    - Pour modifier le formulaire, changer `app/schema.py`, puis lancer `python kobo/build_xlsform.py` et réimporter. Ne pas renommer les questions ni les codes de choix directement dans Kobo : l'API ne les reconnaîtrait plus.
    - Les questions peuvent être déplacées entre groupes : l'API ignore les préfixes de groupe.
 2. **Brancher le webhook** : dans le projet, *Paramètres → REST Services → Enregistrer un nouveau service* :
@@ -134,7 +149,7 @@ Limite du plan gratuit : le service s'endort après 15 minutes sans trafic, et l
 | Méthode | Route | Auth | Rôle |
 |---|---|---|---|
 | POST | `/api/kobo/webhook` | jeton | Réception d'une soumission Kobo |
-| POST | `/api/predict` | — | Prédiction + explication en points, sans enregistrement |
+| POST | `/api/predict` | — | Prédiction + explication (par réponse et par thème), sans enregistrement |
 | GET | `/api/modele` | — | Métriques et paramètres du modèle |
 | GET | `/api/beneficiaires` | Basic | Liste (`statut`, `decision`, `limit`, `offset`) |
 | GET | `/api/beneficiaires/{id}` | Basic | Détail : réponses, explication, historique des revues |
@@ -148,3 +163,4 @@ Limite du plan gratuit : le service s'endort après 15 minutes sans trafic, et l
 
 - Ré-entraîner le modèle avec les décisions corrigées par les superviseur·e·s (export CSV du dashboard), pour passer de données simulées à des données réelles.
 - Renvoyer la décision finale dans Kobo (champ calculé, ou mise à jour de la soumission via l'API Kobo `PATCH /data/bulk/`).
+- **Détecter les anomalies** : réponses incohérentes entre elles, enquêteur dont les décisions s'écartent nettement du modèle, ménages très différents de ceux vus à l'entraînement.

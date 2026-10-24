@@ -2,35 +2,35 @@
 {% block title %}Modèle — Ciblage{% endblock %}
 {% block content %}
 {% set t = m.test %}
-{% set noms = {'regression_logistique': 'Régression logistique', 'lightgbm': 'LightGBM', 'score_predit_plus_lightgbm': 'Score prédit + LightGBM (déployé)'} %}
+{% set noms = {'regression_logistique': 'Régression logistique', 'grille_excel': "Grille Excel de l'agent (seuil 40 points)", 'xgboost': 'XGBoost (déployé)'} %}
 <div class="page-head">
   <div>
     <h1>Le modèle</h1>
     <p class="muted">{{ m.modele }} · version {{ m.version }} · entraîné sur {{ m.n_entrainement }} ménages
-      ({{ m.taux_eligibles_entrainement|pct }} d'éligibles) · seuil de la grille : {{ '%g'|format(m.seuil_grille) }} points</p>
+      ({{ m.taux_eligibles_entrainement|pct }} d'éligibles) · {{ m.n_variables }} variables de l'enquête ménage</p>
   </div>
 </div>
 
 <section class="kpis">
-  <div class="kpi"><span>Précision (test)</span><strong>{{ t.precision|pct }}</strong><small>objectif ≥ {{ m.precision_minimale|pct }}</small></div>
+  <div class="kpi"><span>Accuracy (test)</span><strong>{{ t.accuracy|pct }}</strong></div>
+  <div class="kpi"><span>F1 score</span><strong>{{ t.f1|pct }}</strong></div>
   <div class="kpi"><span>Rappel (éligibles retrouvés)</span><strong>{{ t.rappel|pct }}</strong></div>
-  <div class="kpi"><span>Accord avec l'agent</span><strong>{{ t.accuracy|pct }}</strong></div>
-  <div class="kpi"><span>Erreur sur le score</span><strong>{{ '%.2f'|format(t.erreur_score_points) }}</strong><small>point en moyenne</small></div>
-  <div class="kpi"><span>Seuil de décision</span><strong>{{ '%.2f'|format(m.seuil) }}</strong><small>probabilité</small></div>
+  <div class="kpi"><span>Précision</span><strong>{{ t.precision|pct }}</strong></div>
+  {% if m.validation_croisee %}
+  <div class="kpi"><span>Pire F1 en validation croisée</span><strong>{{ m.validation_croisee.f1.min|pct }}</strong><small>sur 5 parties</small></div>
+  {% endif %}
 </section>
 
 <section class="two-col">
   <div class="card">
     <h2>Comment le modèle décide</h2>
-    <p class="small">Le modèle reproduit le travail de l'agent avec sa grille Excel, en deux étapes :</p>
-    <ol class="small">
-      <li>un <strong>modèle de score</strong> estime le nombre de points que l'agent aurait calculé, et montre combien de points apporte chaque réponse ;</li>
-      <li>un <strong>modèle de décision</strong> reçoit les réponses et ce score, puis décide éligible ou non. Il applique aussi les
-        <strong>exceptions</strong> de la grille (exclusions, inclusions automatiques).</li>
-    </ol>
-    <p class="small">Le seuil de décision est choisi pour garantir au moins {{ m.precision_minimale|pct }} de précision sur les données de validation.</p>
+    <p class="small">Le modèle a appris les décisions de la <strong>vérification approfondie</strong> (visite à domicile et comité de ciblage)
+      à partir des seules réponses de l'enquête ménage. La grille Excel, son score et son seuil ne lui ont <strong>pas</strong> été donnés :
+      il ne recopie pas la grille, il cherche lui-même les relations entre les {{ m.n_variables }} réponses.</p>
+    <p class="small">Ménage éligible si la probabilité atteint {{ m.seuil|pct }}. Chaque décision est expliquée réponse par réponse
+      (contributions SHAP) et reste revue par un superviseur.</p>
     {% if m.zone_grise %}
-    <p class="small"><strong>Zone grise</strong> (score à {{ '%g'|format(m.zone_grise.marge_points) }} points ou moins du seuil, ou modèle hésitant) :
+    <p class="small"><strong>Zone grise</strong> (probabilité entre {{ m.zone_grise.probabilite[0]|pct }} et {{ m.zone_grise.probabilite[1]|pct }}) :
       {{ m.zone_grise.part_menages|pct }} des ménages, mais {{ m.zone_grise.part_erreurs|pct }} des erreurs. Ces ménages sont signalés pour être revus en priorité.</p>
     {% endif %}
   </div>
@@ -38,67 +38,68 @@
     <h2>Matrice de confusion (test)</h2>
     <table class="confusion">
       <tr><th></th><th>Prédit non éligible</th><th>Prédit éligible</th></tr>
-      <tr><th>Agent : non éligible</th><td class="good">{{ t.matrice_confusion.vn }}</td><td class="bad">{{ t.matrice_confusion.fp }}<small>inclusions à tort</small></td></tr>
-      <tr><th>Agent : éligible</th><td class="bad">{{ t.matrice_confusion.fn }}<small>exclusions à tort</small></td><td class="good">{{ t.matrice_confusion.vp }}</td></tr>
+      <tr><th>Vérification : non éligible</th><td class="good">{{ t.matrice_confusion.vn }}</td><td class="bad">{{ t.matrice_confusion.fp }}<small>inclusions à tort</small></td></tr>
+      <tr><th>Vérification : éligible</th><td class="bad">{{ t.matrice_confusion.fn }}<small>exclusions à tort</small></td><td class="good">{{ t.matrice_confusion.vp }}</td></tr>
     </table>
   </div>
 </section>
 
 <section class="two-col">
   <div class="card">
-    <h2>Accord avec l'agent selon le motif de sa décision</h2>
+    <h2>Comparaison (validation, mêmes ménages)</h2>
     <table class="list compact">
-      <thead><tr><th>Motif (feuille Excel)</th><th class="num">Ménages</th><th class="num">Accord</th></tr></thead>
-      <tbody>
-      {% for r in m.accord_par_motif %}
-        <tr><td>{{ r.motif }}</td><td class="num">{{ r.menages }}</td><td class="num">{{ r.accord|pct }}</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    <p class="small muted">Le modèle applique aussi les exclusions et les inclusions automatiques. Les désaccords restants concernent des scores à 1 ou 2 points du seuil.</p>
-  </div>
-  <div class="card">
-    <h2>Modèles comparés (validation, seuil 0,5)</h2>
-    <table class="list compact">
-      <thead><tr><th>Modèle</th><th class="num">Précision</th><th class="num">Rappel</th><th class="num">F1</th></tr></thead>
+      <thead><tr><th>Méthode</th><th class="num">Accuracy</th><th class="num">Précision</th><th class="num">Rappel</th><th class="num">F1</th></tr></thead>
       <tbody>
       {% for r in m.validation_comparaison %}
-        <tr class="{{ 'chosen' if r.modele == 'score_predit_plus_lightgbm' }}"><td>{{ noms.get(r.modele, r.modele) }}</td>
-          <td class="num">{{ r.precision|pct }}</td><td class="num">{{ r.rappel|pct }}</td><td class="num">{{ '%.4f'|format(r.f1) }}</td></tr>
+        <tr class="{{ 'chosen' if r.modele == 'xgboost' }}"><td>{{ noms.get(r.modele, r.modele) }}</td>
+          <td class="num">{{ r.accuracy|pct }}</td><td class="num">{{ r.precision|pct }}</td><td class="num">{{ r.rappel|pct }}</td><td class="num">{{ r.f1|pct }}</td></tr>
       {% endfor %}
       </tbody>
     </table>
-    <p class="small muted">La régression logistique ne sait pas représenter les exceptions de la grille. Donner le score prédit au classifieur sépare
-      « combien de points » de « au-dessus du seuil, sauf exception ».</p>
+    <p class="small muted">La grille additionne des points sur une quinzaine de questions. Elle suffit dans un scénario simple ; avec
+      {{ m.n_variables }} variables, elle ne voit pas les combinaisons de réponses que le modèle apprend.</p>
   </div>
+  {% if m.grille_excel_test %}
+  {% set g = m.grille_excel_test %}
+  <div class="card">
+    <h2>Ce que la grille Excel ne voit pas (test)</h2>
+    <table class="list compact">
+      <tbody>
+        <tr><td>Ménages éligibles oubliés par la grille</td><td class="num">{{ g.eligibles_oublies }}</td></tr>
+        <tr><td>… dont retrouvés par le modèle</td><td class="num"><strong>{{ g.oublies_retrouves_par_le_modele|pct }}</strong></td></tr>
+        <tr><td>Ménages non éligibles retenus par la grille</td><td class="num">{{ g.retenus_a_tort }}</td></tr>
+        <tr><td>… dont écartés par le modèle</td><td class="num"><strong>{{ g.a_tort_ecartes_par_le_modele|pct }}</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
 </section>
 
-{% if m.priorite %}
-<section class="card">
-  <h2>Classement sous contrainte budgétaire</h2>
-  <p class="small">Quand le budget ne couvre pas tous les éligibles, la page <a href="/dashboard/selections">Sélection</a> les classe par <strong>score estimé</strong>,
-    comme l'agent le ferait avec sa grille.</p>
-  <table class="list compact">
-    <tbody>
-      <tr><td>Corrélation de rang avec le score de l'agent (Spearman)</td><td class="num">{{ '%.3f'|format(m.priorite.spearman) }}</td></tr>
-      <tr><td>Liste de l'agent retrouvée, budget couvrant 30 % des éligibles, classement par score estimé</td><td class="num"><strong>{{ m.priorite.recouvrement_top30_score_predit|pct }}</strong></td></tr>
-      <tr><td>Même chose en classant par la certitude du modèle de décision</td><td class="num">{{ m.priorite.recouvrement_top30_log_odds|pct }}</td></tr>
-    </tbody>
-  </table>
-</section>
-{% endif %}
-
-<section class="card">
-  <h2>Importance des critères</h2>
-  <p class="muted small">Nombre moyen de points (en valeur absolue) que chaque question ajoute ou retire au score, mesuré sur le jeu de test.</p>
-  <div class="imp">
-    {% for r in m.importance_globale %}
-    <div class="irow">
-      <span>{{ SHORT_LABELS[r.feature] }}</span>
-      <div class="ibar"><div style="width: {{ (r.importance / max_imp * 100)|round(1) }}%"></div></div>
-      <span class="num">{{ '%.1f'|format(r.importance) }}</span>
+<section class="two-col">
+  <div class="card">
+    <h2>Importance par thème</h2>
+    <p class="muted small">Effet moyen (en valeur absolue, log-odds) des réponses de chaque thème sur la décision, mesuré sur le jeu de test.</p>
+    <div class="imp">
+      {% for r in m.importance_themes %}
+      <div class="irow">
+        <span>{{ r.theme }}</span>
+        <div class="ibar"><div style="width: {{ (r.importance / max_theme * 100)|round(1) }}%"></div></div>
+        <span class="num">{{ '%.2f'|format(r.importance) }}</span>
+      </div>
+      {% endfor %}
     </div>
-    {% endfor %}
+  </div>
+  <div class="card">
+    <h2>Les 20 questions les plus importantes</h2>
+    <div class="imp">
+      {% for r in importance %}
+      <div class="irow">
+        <span>{{ SHORT_LABELS[r.feature] }}</span>
+        <div class="ibar"><div style="width: {{ (r.importance / max_imp * 100)|round(1) }}%"></div></div>
+        <span class="num">{{ '%.2f'|format(r.importance) }}</span>
+      </div>
+      {% endfor %}
+    </div>
   </div>
 </section>
 {% endblock %}

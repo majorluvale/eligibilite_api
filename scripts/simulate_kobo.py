@@ -1,4 +1,4 @@
-"""Envoie des ménages simulés au webhook, au format KoboToolbox (questions du formulaire v5).
+"""Envoie des ménages simulés au webhook, au format KoboToolbox (questions du formulaire v6).
 
 Utile pour une démonstration sans enquête terrain :
     python scripts/simulate_kobo.py --url http://localhost:8000 --token <KOBO_WEBHOOK_TOKEN> -n 40
@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "notebooks"))
 
-import generateur_ciblage_v5 as gen  # noqa: E402
+import generateur_ciblage_v6 as gen  # noqa: E402
 from app.schema import FEATURES  # noqa: E402
 from kobo.build_xlsform import GROUPS  # noqa: E402
 

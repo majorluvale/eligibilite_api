@@ -2,30 +2,33 @@ import copy
 
 import pytest
 
+from app.main import EXEMPLE_MENAGE
 from app.security import csrf_token
 from app.services import repartir
-from tests.test_api import KOBO_PAYLOAD, auth, client  # noqa: F401  (fixture partagée)
+from tests.test_api import KOBO_PAYLOAD, auth, client, kobo  # noqa: F401  (fixture partagée)
 
-# Ménages éligibles de vulnérabilité croissante (score de la grille : environ 42, 48, 55 et 78 points)
-_BASE = {"profil/statut_menage": "resident", "profil/sexe_chef_menage": "femme", "profil/taille_menage": "8",
-         "profil/enfants_moins_5": "3", "vulnerabilites/femme_enceinte_allaitante": "non",
-         "logement/type_logement": "maison_endommagee", "logement/articles_essentiels": "3",
-         "alimentation_revenus/repas_par_jour": "2", "alimentation_revenus/jours_sans_nourriture_7j": "1"}
+# Ménages éligibles de vulnérabilité croissante (variantes de l'exemple de l'API)
+_MOINS = {"statut_menage": "resident", "type_logement": "maison_endommagee", "statut_occupation": "proprietaire",
+          "incident_securite_3_mois": "non", "biens_perdus_crise": "non", "documents_identite": "oui",
+          "restriction_mouvements": "non"}
+_RESIDENT = {k: v for k, v in EXEMPLE_MENAGE.items() if k not in ("duree_deplacement_mois", "nombre_deplacements_12m")}
 PROFILS = [
-    {**_BASE, "profil/localite": "Kibirizi"},
-    {**_BASE, "profil/localite": "Kibirizi", "logement/type_logement": "abri_fortune"},
-    {**_BASE, "profil/localite": "Binza", "logement/type_logement": "abri_fortune", "alimentation_revenus/repas_par_jour": "1"},
-    {**_BASE, "profil/localite": "Binza", "logement/type_logement": "abri_fortune", "alimentation_revenus/repas_par_jour": "1",
-     "profil/statut_menage": "deplace", "profil/duree_deplacement_mois": "1", "vulnerabilites/membre_handicap": "oui"},
+    {**_RESIDENT, **_MOINS, "localite": "Kibirizi", "rcsi_aliments_moins_chers": 3, "rcsi_reduction_portions": 2,
+     "rcsi_moins_de_repas": 2, "rcsi_adultes_pour_enfants": 1, "jours_legumineuses": 3, "jours_huile": 4,
+     "revenu_30j_usd": 45, "part_depenses_alimentation_pct": 70, "stock_nourriture_jours": 3},
+    {**_RESIDENT, **_MOINS, "localite": "Kibirizi", "rcsi_reduction_portions": 4, "revenu_30j_usd": 35, "jours_legumineuses": 2},
+    {**EXEMPLE_MENAGE, "localite": "Binza", "rcsi_reduction_portions": 4},
+    {**EXEMPLE_MENAGE, "localite": "Binza", "jours_sans_nourriture_7j": 4, "enfant_malnutrition_depiste": "oui",
+     "lcs_mendicite": "oui"},
 ]
+IDENTITE = {k: v for k, v in KOBO_PAYLOAD.items() if k.startswith(("_", "identification/", "meta/", "consentement"))}
 
 
 @pytest.fixture(scope="module")
 def menages(client):
     ids = []
     for i, profil in enumerate(PROFILS):
-        p = {k: v for k, v in copy.deepcopy(KOBO_PAYLOAD).items() if k != "profil/duree_deplacement_mois"}
-        p.update(profil)
+        p = {**copy.deepcopy(IDENTITE), **kobo(profil)}
         p.update({"_id": 9000 + i, "_uuid": f"sel-{i}", "identification/nom_chef_menage": f"Profil {i}"})
         r = client.post("/api/kobo/webhook?token=tok123", json=p)
         assert r.status_code == 200 and r.json()["eligible"], r.text

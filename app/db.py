@@ -62,8 +62,8 @@ class Beneficiary(Base):
         return (self.features or {}).get(ZONE_FIELD)
 
     @property
-    def points(self) -> float:
-        """Score estimé dans la grille de l'ONG = base + somme des points par question."""
+    def indice(self) -> float:
+        """Log-odds du modèle = valeur de base + somme des contributions des questions (indice de priorité)."""
         return self.base_value + sum(e["contribution"] for e in self.explanation)
 
 
@@ -96,7 +96,7 @@ class Selection(Base):
     repartition: Mapped[str] = mapped_column(String(30))  # "globale" | "proportionnelle_zone"
     inclure_non_revus: Mapped[bool] = mapped_column(Boolean)
     model_version: Mapped[str] = mapped_column(String(50))
-    methode_priorite: Mapped[str] = mapped_column(String(20))  # "score_predit" | "log_odds"
+    methode_priorite: Mapped[str] = mapped_column(String(20))  # "log_odds" (anciennes listes : "score_predit")
 
     items: Mapped[list["SelectionItem"]] = relationship(
         back_populates="selection", order_by="SelectionItem.rang", cascade="all, delete-orphan")

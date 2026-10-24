@@ -52,18 +52,18 @@
   <thead>
     <tr>
       <th>Chef de ménage</th><th>Village</th><th>Localité</th><th>Reçu le</th>
-      <th class="num">Points</th><th>Modèle</th><th>Décision finale</th><th>Revue</th>
+      <th class="num">Probabilité</th><th>Modèle</th><th>Décision finale</th><th>Revue</th>
     </tr>
   </thead>
   <tbody>
   {% for b in rows %}
     <tr onclick="location.href='/dashboard/beneficiaires/{{ b.id }}'">
       <td><a href="/dashboard/beneficiaires/{{ b.id }}">{{ b.nom_chef_menage or ('Ménage #' ~ b.id) }}</a>
-        {% if b.a_verifier and b.statut_revue == 'en_attente' %}<span class="tag warn" title="Score proche du seuil">zone grise</span>{% endif %}</td>
+        {% if b.a_verifier and b.statut_revue == 'en_attente' %}<span class="tag warn" title="Le modèle hésite : à vérifier">zone grise</span>{% endif %}</td>
       <td>{{ b.village or '—' }}</td>
       <td>{{ b.zone or '—' }}</td>
       <td>{{ (b.submitted_at or b.received_at).strftime('%d/%m/%Y %H:%M') }}</td>
-      <td class="num">{{ '%.1f'|format(b.points) }}</td>
+      <td class="num">{{ b.score|pct }}</td>
       <td><span class="pill {{ 'yes' if b.model_decision else 'no' }}">{{ 'Éligible' if b.model_decision else 'Non éligible' }}</span></td>
       <td><span class="pill {{ 'yes' if b.final_decision else 'no' }}">{{ 'Éligible' if b.final_decision else 'Non éligible' }}</span></td>
       <td>

@@ -17,14 +17,13 @@
   <div class="card">
     <h3>Décision du modèle</h3>
     <span class="pill big {{ 'yes' if b.model_decision else 'no' }}">{{ 'Éligible' if b.model_decision else 'Non éligible' }}</span>
-    {% set echelle = [80, b.points + 5]|max %}
-    <div class="gauge" aria-label="Score estimé {{ '%.1f'|format(b.points) }} points, seuil de la grille {{ seuil_grille }}">
-      <div class="gauge-fill {{ 'yes' if b.model_decision else 'no' }}" style="width: {{ ([b.points, 0]|max / echelle * 100)|round(1) }}%"></div>
-      <div class="gauge-thr" style="left: {{ (seuil_grille / echelle * 100)|round(1) }}%"><span>seuil {{ '%g'|format(seuil_grille) }} pts</span></div>
+    <div class="gauge" aria-label="Probabilité d'éligibilité {{ b.score|pct }}, seuil {{ b.threshold|pct }}">
+      <div class="gauge-fill {{ 'yes' if b.model_decision else 'no' }}" style="width: {{ (b.score * 100)|round(1) }}%"></div>
+      <div class="gauge-thr" style="left: {{ (b.threshold * 100)|round(1) }}%"><span>seuil {{ b.threshold|pct }}</span></div>
     </div>
-    <p class="muted small">Score estimé : <strong>{{ '%.1f'|format(b.points) }} points</strong> dans la grille de l'ONG
-      (probabilité d'éligibilité : {{ '%.2f'|format(b.score) }}).
-      {% if b.a_verifier %}<br><strong class="warn-text">Score proche du seuil de la grille : décision à vérifier en priorité.</strong>{% endif %}</p>
+    <p class="muted small">Probabilité d'éligibilité : <strong>{{ b.score|pct }}</strong>
+      (indice de priorité : {{ '%.2f'|format(b.indice) }}).
+      {% if b.a_verifier %}<br><strong class="warn-text">Le modèle hésite pour ce ménage : décision à vérifier en priorité.</strong>{% endif %}</p>
   </div>
   <div class="card">
     <h3>Décision finale</h3>
@@ -41,12 +40,29 @@
 <section class="card">
   <h2>Pourquoi le modèle a décidé ainsi</h2>
   <p class="summary">{{ b.summary }}</p>
+  {% if themes %}
+  <h3>Par thème du questionnaire</h3>
+  <div class="contrib">
+    {% for t in themes %}
+    {% set w = (t.contribution|abs / max_theme * 100)|round(1) %}
+    <div class="crow">
+      <div class="clabel"><strong>{{ t.theme }}</strong></div>
+      <div class="cbar">
+        <div class="half neg">{% if t.contribution < 0 %}<div class="bar no" style="width: {{ w }}%"></div>{% endif %}</div>
+        <div class="half pos">{% if t.contribution > 0 %}<div class="bar yes" style="width: {{ w }}%"></div>{% endif %}</div>
+      </div>
+      <div class="cval">{{ '%+.2f'|format(t.contribution) }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <h3 class="mt">Les {{ principaux|length }} réponses les plus déterminantes</h3>
   <div class="legend">
-    <span><i class="sw no"></i> retire des points</span>
-    <span><i class="sw yes"></i> ajoute des points</span>
+    <span><i class="sw no"></i> éloigne de l'éligibilité</span>
+    <span><i class="sw yes"></i> rapproche de l'éligibilité</span>
   </div>
   <div class="contrib">
-    {% for e in b.explanation %}
+    {% for e in principaux %}
     {% set w = (e.contribution|abs / max_abs * 100)|round(1) %}
     <div class="crow">
       <div class="clabel"><strong>{{ e.label }}</strong><span>{{ e.value }}</span></div>
@@ -54,14 +70,14 @@
         <div class="half neg">{% if e.contribution < 0 %}<div class="bar no" style="width: {{ w }}%"></div>{% endif %}</div>
         <div class="half pos">{% if e.contribution > 0 %}<div class="bar yes" style="width: {{ w }}%"></div>{% endif %}</div>
       </div>
-      <div class="cval">{{ '%+.1f'|format(e.contribution) }} pts<small>{{ (e.share * 100)|round|int }} %</small></div>
+      <div class="cval">{{ '%+.2f'|format(e.contribution) }}<small>{{ (e.share * 100)|round|int }} %</small></div>
     </div>
     {% endfor %}
   </div>
-  <p class="muted small">Chaque barre indique combien de points la réponse ajoute ou retire par rapport à un ménage moyen,
-    comme une ligne de la feuille de calcul de l'agent. Les points s'additionnent :
-    {{ '%.1f'|format(b.base_value) }} (ménage moyen) + somme des points = {{ '%.1f'|format(b.points) }} points.
-    Les exclusions et inclusions automatiques de la grille sont appliquées par le modèle de décision et signalées dans le résumé.</p>
+  <p class="muted small">Chaque barre indique de combien la réponse rapproche ou éloigne le ménage de l'éligibilité, par rapport à un
+    ménage moyen (contributions SHAP, en log-odds). Les effets s'additionnent :
+    {{ '%.2f'|format(b.base_value) }} (ménage moyen) + somme des effets = {{ '%.2f'|format(b.indice) }}, soit une probabilité de {{ b.score|pct }}.
+    {% if nb_autres %}Les {{ nb_autres }} autres réponses apportent ensemble {{ '%+.2f'|format(autres) }}.{% endif %}</p>
 </section>
 
 <section class="two-col">
@@ -72,7 +88,8 @@
       <tr><th>{{ label }}</th><td>{{ b[key] or '—' }}</td></tr>
       {% endfor %}
       {% for f in features %}
-      <tr><th>{{ f.label }}</th><td>{{ libelle(f.name, b.features.get(f.name)) }}</td></tr>
+      {% if loop.first or f.theme != loop.previtem.theme %}<tr class="kv-theme"><th colspan="2">{{ f.theme }}</th></tr>{% endif %}
+      <tr><th title="{{ f.label }}">{{ f.short }}</th><td>{{ libelle(f.name, b.features.get(f.name)) }}</td></tr>
       {% endfor %}
     </table>
   </div>

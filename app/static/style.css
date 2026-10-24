@@ -140,6 +140,7 @@ table { border-collapse: collapse; width: 100%; }
 .kv th, .kv td { text-align: left; padding: .45rem .3rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 .kv th { font-weight: 500; color: var(--muted); width: 55%; font-size: .87rem; }
 .kv tr:last-child th, .kv tr:last-child td { border-bottom: 0; }
+.kv .kv-theme th { color: var(--ink); font-weight: 600; padding-top: 1rem; width: auto; }
 
 .review { display: grid; gap: .7rem; }
 .choice { display: flex; gap: .7rem; align-items: flex-start; padding: .7rem .8rem; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }

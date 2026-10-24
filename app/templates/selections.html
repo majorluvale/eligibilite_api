@@ -41,19 +41,12 @@
 
   <div class="card">
     <h2>Comment le classement est fait</h2>
-    {% if methode == 'score_predit' %}
-    <p class="small">Un <strong>modèle de priorité</strong> a appris, à partir des listes passées, à prédire le <strong>score que l'agent
-      calculait avec sa grille</strong> (les points de la feuille Excel). Les éligibles sont classés par ce score prédit,
-      du plus vulnérable au moins vulnérable.{% if prio.recouvrement_top30_score_predit %} Sur les données de test, il retrouve
-      <strong>{{ prio.recouvrement_top30_score_predit|pct }}</strong> de la liste que l'agent aurait produite pour un budget couvrant 30 % des éligibles
-      (contre {{ prio.recouvrement_top30_log_odds|pct }} en classant par le modèle de décision).{% endif %}</p>
-    {% else %}
-    <p class="small">Le modèle n'a pas été entraîné avec le score historique de l'agent. Les éligibles sont classés par
-      l'<strong>indice du modèle de décision</strong> (la somme des effets de chaque critère, comme dans « Pourquoi le modèle a décidé ainsi »).
-      Pour un classement plus fidèle, entraînez le modèle avec une colonne de score de l'agent.</p>
-    {% endif %}
-    <p class="small">On ne classe pas par probabilité d'éligibilité : elle mesure la <em>certitude</em> du modèle, pas
-      l'<em>intensité des besoins</em>, et elle vaut presque 1 pour beaucoup de ménages.</p>
+    <p class="small">Les éligibles sont classés par l'<strong>indice de priorité</strong> du modèle : la somme des effets de toutes
+      les réponses du ménage (alimentation, stratégies d'adaptation, revenu, logement, protection...), comme dans
+      « Pourquoi le modèle a décidé ainsi ». Plus l'indice est élevé, plus le profil du ménage ressemble à celui des ménages
+      retenus par la vérification approfondie. La grille Excel n'intervient pas dans ce classement.</p>
+    <p class="small">On ne classe pas par probabilité d'éligibilité : elle plafonne à 100 % pour beaucoup de ménages et ne les
+      départage plus. L'indice, lui, continue de les séparer.</p>
     <p class="small muted">Ex aequo : le ménage enquêté le plus tôt passe d'abord. Chaque liste est un instantané daté, avec la version du modèle :
       les revues faites après sa création ne la modifient pas.</p>
   </div>

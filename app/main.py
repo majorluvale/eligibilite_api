@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from . import kobo, services
 from .config import get_settings
 from .db import Beneficiary, Selection, get_session, init_db
-from .ml import load_metadata, load_model
+from .ml import load_metadata, load_model, par_theme
 from .schema import FEATURES, IDENTITY_FIELDS, SHORT_LABELS, ValidationError, libelle, normalize_features
 from .security import check_csrf, check_webhook_token, csrf_token, current_user
 
@@ -27,6 +27,7 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("eligibilite")
 HERE = Path(__file__).resolve().parent
 PAGE_SIZE = 25
+NB_FACTEURS = 12  # réponses détaillées dans « Pourquoi le modèle a décidé ainsi » ; les autres sont regroupées
 
 
 @asynccontextmanager
@@ -58,6 +59,32 @@ templates.env.filters["pct"] = fmt_pct
 
 # ----------------------------------------------------------------------------- API
 
+# Ménage déplacé depuis 2 mois, en forte insécurité alimentaire (exemple de la documentation /docs)
+EXEMPLE_MENAGE = {
+    "localite": "Kibirizi", "statut_menage": "deplace", "duree_deplacement_mois": 2, "nombre_deplacements_12m": 2,
+    "sexe_chef_menage": "femme", "age_chef_menage": 34, "etat_civil_chef": "veuf", "instruction_chef": "primaire",
+    "taille_menage": 8, "enfants_moins_5": 2, "enfants_5_17": 3, "personnes_60_plus": 0, "enfants_non_scolarises": 2,
+    "femme_enceinte_allaitante": "oui", "membre_handicap": "non", "membre_maladie_chronique": "non",
+    "enfant_non_accompagne_heberge": "non", "type_logement": "abri_fortune", "statut_occupation": "site_deplaces",
+    "nombre_pieces": 1, "articles_essentiels": 1, "possede_betail": "non", "acces_terre_cultivable": "non",
+    "toit_etanche": "non", "source_eclairage": "aucune", "possede_telephone": "non", "source_eau": "eau_surface",
+    "temps_collecte_eau_min": 60, "type_latrine": "aucune", "savon_disponible": "non",
+    "enfant_malade_2_semaines": "oui", "acces_soins": "non_cout", "vaccination_enfants_a_jour": "non",
+    "enfant_malnutrition_depiste": "non", "jours_cereales": 5, "jours_legumineuses": 1, "jours_lait": 0,
+    "jours_viande_poisson": 0, "jours_legumes": 2, "jours_fruits": 0, "jours_huile": 1, "jours_sucre": 0,
+    "stock_nourriture_jours": 0, "repas_par_jour": 1, "jours_sans_nourriture_7j": 2,
+    "rcsi_aliments_moins_chers": 6, "rcsi_emprunt_nourriture": 3, "rcsi_reduction_portions": 5,
+    "rcsi_adultes_pour_enfants": 3, "rcsi_moins_de_repas": 5, "lcs_emprunt_argent": "oui",
+    "lcs_vente_biens_menagers": "oui", "lcs_reduction_depenses_sante": "oui", "lcs_consommation_semences": "non",
+    "lcs_retrait_enfants_ecole": "oui", "lcs_vente_derniere_femelle": "non", "lcs_vente_maison_terre": "non",
+    "lcs_mendicite": "non", "lcs_travail_enfants": "non", "source_revenu": "travail_journalier",
+    "membres_avec_revenu": 1, "perte_revenu_6_mois": "oui", "revenu_30j_usd": 25, "part_depenses_alimentation_pct": 85,
+    "dette_usd": 60, "epargne_disponible": "non", "incident_securite_3_mois": "oui", "biens_perdus_crise": "oui",
+    "membre_disparu_detenu": "non", "documents_identite": "non", "restriction_mouvements": "oui",
+    "assistance_3_derniers_mois": "non",
+}
+
+
 @app.get("/health", tags=["système"])
 def health():
     return {"status": "ok", "model_version": load_model(get_settings().model_dir).version}
@@ -81,12 +108,11 @@ class PredictionOut(BaseModel):
     eligible: bool
     score: float
     threshold: float
-    points: float
-    seuil_grille: float
+    log_odds: float
     a_verifier: bool
     base_value: float
     explanation: list[dict]
-    exception: dict | None
+    themes: list[dict]
     summary: str
     model_version: str
     indice_priorite: float
@@ -94,12 +120,7 @@ class PredictionOut(BaseModel):
 
 
 @app.post("/api/predict", tags=["modèle"], response_model=PredictionOut)
-def predict(reponses: dict = Body(..., examples=[{
-    "localite": "Kibirizi", "statut_menage": "deplace", "duree_deplacement_mois": 2, "sexe_chef_menage": "femme",
-    "age_chef_menage": 34, "taille_menage": 7, "enfants_moins_5": 2, "membre_handicap": "non",
-    "membre_maladie_chronique": "non", "femme_enceinte_allaitante": "oui", "enfant_non_accompagne_heberge": "non",
-    "type_logement": "abri_fortune", "articles_essentiels": 1, "repas_par_jour": 1, "jours_sans_nourriture_7j": 2,
-    "source_revenu": "travail_journalier", "possede_betail": "non", "assistance_3_derniers_mois": "non"}])):
+def predict(reponses: dict = Body(..., examples=[EXEMPLE_MENAGE])):
     """Prédiction sans enregistrement (codes Kobo ou libellés des choix)."""
     try:
         features = normalize_features(kobo.flatten(reponses))
@@ -220,11 +241,15 @@ def dashboard(request: Request, q: str | None = None, statut: str | None = None,
 def beneficiary_page(request: Request, ben_id: int, msg: str | None = None, err: str | None = None,
                      session: Session = Depends(get_session), user: str = Depends(current_user)):
     ben = get_or_404(session, ben_id)
-    max_abs = max((abs(e["contribution"]) for e in ben.explanation), default=1.0) or 1.0
+    principaux = ben.explanation[:NB_FACTEURS]
+    max_abs = max((abs(e["contribution"]) for e in principaux), default=1.0) or 1.0
+    themes = par_theme(ben.explanation) if all("theme" in e for e in ben.explanation) else []
+    max_theme = max((abs(t["contribution"]) for t in themes), default=1.0) or 1.0
     return templates.TemplateResponse(request, "beneficiaire.html", {
         "user": user, "b": ben, "features": FEATURES, "identity_fields": IDENTITY_FIELDS,
+        "principaux": principaux, "autres": sum(e["contribution"] for e in ben.explanation[NB_FACTEURS:]),
+        "nb_autres": len(ben.explanation) - len(principaux), "themes": themes, "max_theme": max_theme,
         "max_abs": max_abs, "csrf": csrf_token(user), "msg": msg, "err": err,
-        "seuil_grille": load_model(get_settings().model_dir).seuil_grille,
     })
 
 
@@ -256,8 +281,11 @@ def dashboard_sync(csrf: str = Form(""), session: Session = Depends(get_session)
 @app.get("/dashboard/modele", response_class=HTMLResponse, include_in_schema=False)
 def model_page(request: Request, user: str = Depends(current_user)):
     meta = load_metadata(get_settings().model_dir)
-    max_imp = max((r["importance"] for r in meta["importance_globale"]), default=1.0) or 1.0
-    return templates.TemplateResponse(request, "modele.html", {"user": user, "m": meta, "max_imp": max_imp})
+    importance = meta["importance_globale"][:20]
+    max_imp = max((r["importance"] for r in importance), default=1.0) or 1.0
+    max_theme = max((r["importance"] for r in meta.get("importance_themes", [])), default=1.0) or 1.0
+    return templates.TemplateResponse(request, "modele.html", {"user": user, "m": meta, "importance": importance,
+                                                                "max_imp": max_imp, "max_theme": max_theme})
 
 
 @app.get("/dashboard/export.csv", include_in_schema=False)

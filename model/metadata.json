@@ -1,205 +1,595 @@
 {
-  "version": "20261022192804",
-  "modele": "score prédit + LightGBM",
-  "seuil": 0.93,
-  "seuil_grille": 40,
-  "precision_minimale": 0.98,
-  "taux_eligibles_entrainement": 0.2705,
-  "n_entrainement": 70000,
-  "donnees": "ciblage_v5.csv",
+  "version": "20261024001705",
+  "modele": "XGBoost",
+  "parametres": {
+    "n_estimators": 3000,
+    "max_depth": 3,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8
+  },
+  "seuil": 0.5,
+  "taux_eligibles_entrainement": 0.3,
+  "n_entrainement": 80000,
+  "n_variables": 72,
+  "donnees": "ciblage_v6.csv",
+  "cible": "décision de la vérification approfondie (la grille Excel n'est pas utilisée)",
   "validation_comparaison": [
     {
       "modele": "regression_logistique",
-      "seuil": 0.5,
-      "precision": 0.9214,
-      "rappel": 0.8812,
-      "f1": 0.9008,
-      "accuracy": 0.9475,
-      "pr_auc": 0.9613,
+      "precision": 0.916,
+      "rappel": 0.9123,
+      "f1": 0.9142,
+      "accuracy": 0.9486,
       "matrice_confusion": {
-        "vn": 10638,
-        "fp": 305,
-        "fn": 482,
-        "vp": 3575
+        "vn": 6749,
+        "fp": 251,
+        "fn": 263,
+        "vp": 2737
       }
     },
     {
-      "modele": "lightgbm",
-      "seuil": 0.5,
-      "precision": 0.9882,
-      "rappel": 0.9689,
-      "f1": 0.9785,
-      "accuracy": 0.9885,
-      "pr_auc": 0.9987,
+      "modele": "grille_excel",
+      "precision": 0.6589,
+      "rappel": 0.5647,
+      "f1": 0.6081,
+      "accuracy": 0.7817,
       "matrice_confusion": {
-        "vn": 10896,
-        "fp": 47,
-        "fn": 126,
-        "vp": 3931
+        "vn": 6123,
+        "fp": 877,
+        "fn": 1306,
+        "vp": 1694
       }
     },
     {
-      "modele": "score_predit_plus_lightgbm",
-      "seuil": 0.5,
-      "precision": 0.9914,
-      "rappel": 0.9926,
-      "f1": 0.992,
-      "accuracy": 0.9957,
-      "pr_auc": 0.9998,
+      "modele": "xgboost",
+      "precision": 0.9685,
+      "rappel": 0.9633,
+      "f1": 0.9659,
+      "accuracy": 0.9796,
+      "pr_auc": 0.997,
       "matrice_confusion": {
-        "vn": 10908,
-        "fp": 35,
-        "fn": 30,
-        "vp": 4027
+        "vn": 6906,
+        "fp": 94,
+        "fn": 110,
+        "vp": 2890
       }
     }
   ],
   "test": {
-    "seuil": 0.93,
-    "precision": 0.9972,
-    "rappel": 0.9823,
-    "f1": 0.9897,
-    "accuracy": 0.9945,
-    "pr_auc": 0.9997,
+    "seuil": 0.5,
+    "precision": 0.9757,
+    "rappel": 0.9617,
+    "f1": 0.9686,
+    "accuracy": 0.9813,
+    "pr_auc": 0.9968,
     "matrice_confusion": {
-      "vn": 10932,
-      "fp": 11,
-      "fn": 72,
-      "vp": 3985
-    },
-    "erreur_score_points": 0.328
-  },
-  "accord_par_motif": [
-    {
-      "motif": "exclusion : assistance récente (vivres/cash)",
-      "accord": 1.0,
-      "menages": 1639
-    },
-    {
-      "motif": "exclusion : salaire régulier",
-      "accord": 1.0,
-      "menages": 1089
-    },
-    {
-      "motif": "inclusion automatique",
-      "accord": 1.0,
-      "menages": 506
-    },
-    {
-      "motif": "score < 40",
-      "accord": 0.9987,
-      "menages": 8215
-    },
-    {
-      "motif": "score >= 40",
-      "accord": 0.9797,
-      "menages": 3551
+      "vn": 6928,
+      "fp": 72,
+      "fn": 115,
+      "vp": 2885
     }
-  ],
+  },
+  "validation_croisee": {
+    "accuracy": {
+      "moyenne": 0.9801,
+      "min": 0.9787
+    },
+    "f1": {
+      "moyenne": 0.9667,
+      "min": 0.9644
+    },
+    "rappel": {
+      "moyenne": 0.9632,
+      "min": 0.9615
+    },
+    "precision": {
+      "moyenne": 0.9702,
+      "min": 0.9661
+    }
+  },
   "zone_grise": {
-    "marge_points": 3,
-    "part_menages": 0.1404,
-    "part_erreurs": 1.0
+    "probabilite": [
+      0.2,
+      0.8
+    ],
+    "part_menages": 0.0689,
+    "part_erreurs": 0.877
+  },
+  "grille_excel_test": {
+    "precision": 0.6677,
+    "rappel": 0.5847,
+    "f1": 0.6234,
+    "accuracy": 0.7881,
+    "matrice_confusion": {
+      "vn": 6127,
+      "fp": 873,
+      "fn": 1246,
+      "vp": 1754
+    },
+    "eligibles_oublies": 1246,
+    "oublies_retrouves_par_le_modele": 0.9366,
+    "retenus_a_tort": 873,
+    "a_tort_ecartes_par_le_modele": 0.9656
   },
   "priorite": {
-    "methode": "score_predit",
-    "cible": "score_excel",
-    "erreur_moyenne_points": 0.328,
-    "spearman": 0.9966,
-    "recouvrement_top30_score_predit": 0.9663,
-    "recouvrement_top30_log_odds": 0.4355
+    "methode": "log_odds"
   },
   "importance_globale": [
     {
-      "feature": "statut_menage",
-      "importance": 5.623
-    },
-    {
-      "feature": "repas_par_jour",
-      "importance": 3.515
-    },
-    {
-      "feature": "type_logement",
-      "importance": 3.124
-    },
-    {
-      "feature": "sexe_chef_menage",
-      "importance": 2.602
-    },
-    {
-      "feature": "source_revenu",
-      "importance": 2.254
-    },
-    {
-      "feature": "articles_essentiels",
-      "importance": 2.216
+      "feature": "revenu_30j_usd",
+      "theme": "Moyens d'existence",
+      "importance": 3.6447
     },
     {
       "feature": "taille_menage",
-      "importance": 2.004
+      "theme": "Composition",
+      "importance": 1.6668
     },
     {
-      "feature": "jours_sans_nourriture_7j",
-      "importance": 1.931
+      "feature": "stock_nourriture_jours",
+      "theme": "Alimentation",
+      "importance": 1.3142
     },
     {
-      "feature": "possede_betail",
-      "importance": 1.853
+      "feature": "jours_viande_poisson",
+      "theme": "Alimentation",
+      "importance": 1.3133
     },
     {
-      "feature": "age_chef_menage",
-      "importance": 1.641
+      "feature": "jours_legumineuses",
+      "theme": "Alimentation",
+      "importance": 1.1331
     },
     {
-      "feature": "femme_enceinte_allaitante",
-      "importance": 1.588
+      "feature": "epargne_disponible",
+      "theme": "Moyens d'existence",
+      "importance": 1.1315
     },
     {
-      "feature": "enfants_moins_5",
-      "importance": 1.509
+      "feature": "type_logement",
+      "theme": "Logement et biens",
+      "importance": 1.1071
     },
     {
-      "feature": "membre_handicap",
-      "importance": 1.489
+      "feature": "jours_lait",
+      "theme": "Alimentation",
+      "importance": 0.9534
     },
     {
-      "feature": "membre_maladie_chronique",
-      "importance": 1.087
+      "feature": "perte_revenu_6_mois",
+      "theme": "Moyens d'existence",
+      "importance": 0.9018
+    },
+    {
+      "feature": "rcsi_adultes_pour_enfants",
+      "theme": "Stratégies d'adaptation",
+      "importance": 0.7003
+    },
+    {
+      "feature": "statut_menage",
+      "theme": "Profil",
+      "importance": 0.6303
+    },
+    {
+      "feature": "nombre_deplacements_12m",
+      "theme": "Profil",
+      "importance": 0.5677
+    },
+    {
+      "feature": "jours_cereales",
+      "theme": "Alimentation",
+      "importance": 0.5539
+    },
+    {
+      "feature": "rcsi_emprunt_nourriture",
+      "theme": "Stratégies d'adaptation",
+      "importance": 0.5498
+    },
+    {
+      "feature": "biens_perdus_crise",
+      "theme": "Protection",
+      "importance": 0.5408
+    },
+    {
+      "feature": "dette_usd",
+      "theme": "Moyens d'existence",
+      "importance": 0.5221
+    },
+    {
+      "feature": "enfant_malade_2_semaines",
+      "theme": "Santé et nutrition",
+      "importance": 0.4327
+    },
+    {
+      "feature": "acces_soins",
+      "theme": "Santé et nutrition",
+      "importance": 0.4184
     },
     {
       "feature": "duree_deplacement_mois",
-      "importance": 0.768
+      "theme": "Profil",
+      "importance": 0.417
     },
     {
-      "feature": "enfant_non_accompagne_heberge",
-      "importance": 0.726
+      "feature": "incident_securite_3_mois",
+      "theme": "Protection",
+      "importance": 0.3961
+    },
+    {
+      "feature": "jours_legumes",
+      "theme": "Alimentation",
+      "importance": 0.3872
+    },
+    {
+      "feature": "restriction_mouvements",
+      "theme": "Protection",
+      "importance": 0.3799
+    },
+    {
+      "feature": "rcsi_aliments_moins_chers",
+      "theme": "Stratégies d'adaptation",
+      "importance": 0.3723
+    },
+    {
+      "feature": "toit_etanche",
+      "theme": "Logement et biens",
+      "importance": 0.3719
+    },
+    {
+      "feature": "lcs_retrait_enfants_ecole",
+      "theme": "Stratégies d'adaptation",
+      "importance": 0.3582
+    },
+    {
+      "feature": "rcsi_reduction_portions",
+      "theme": "Stratégies d'adaptation",
+      "importance": 0.3236
+    },
+    {
+      "feature": "rcsi_moins_de_repas",
+      "theme": "Stratégies d'adaptation",
+      "importance": 0.2969
+    },
+    {
+      "feature": "lcs_travail_enfants",
+      "theme": "Stratégies d'adaptation",
+      "importance": 0.2777
+    },
+    {
+      "feature": "jours_fruits",
+      "theme": "Alimentation",
+      "importance": 0.2674
+    },
+    {
+      "feature": "documents_identite",
+      "theme": "Protection",
+      "importance": 0.2565
     },
     {
       "feature": "assistance_3_derniers_mois",
-      "importance": 0.001
+      "theme": "Assistance",
+      "importance": 0.2416
+    },
+    {
+      "feature": "lcs_vente_derniere_femelle",
+      "theme": "Stratégies d'adaptation",
+      "importance": 0.2394
+    },
+    {
+      "feature": "jours_sans_nourriture_7j",
+      "theme": "Alimentation",
+      "importance": 0.2217
+    },
+    {
+      "feature": "femme_enceinte_allaitante",
+      "theme": "Composition",
+      "importance": 0.2161
+    },
+    {
+      "feature": "enfant_malnutrition_depiste",
+      "theme": "Santé et nutrition",
+      "importance": 0.2145
+    },
+    {
+      "feature": "etat_civil_chef",
+      "theme": "Profil",
+      "importance": 0.2124
+    },
+    {
+      "feature": "lcs_mendicite",
+      "theme": "Stratégies d'adaptation",
+      "importance": 0.2086
+    },
+    {
+      "feature": "jours_huile",
+      "theme": "Alimentation",
+      "importance": 0.2062
+    },
+    {
+      "feature": "lcs_emprunt_argent",
+      "theme": "Stratégies d'adaptation",
+      "importance": 0.2004
+    },
+    {
+      "feature": "lcs_consommation_semences",
+      "theme": "Stratégies d'adaptation",
+      "importance": 0.1942
+    },
+    {
+      "feature": "membre_handicap",
+      "theme": "Composition",
+      "importance": 0.1906
+    },
+    {
+      "feature": "jours_sucre",
+      "theme": "Alimentation",
+      "importance": 0.1818
+    },
+    {
+      "feature": "lcs_reduction_depenses_sante",
+      "theme": "Stratégies d'adaptation",
+      "importance": 0.1762
+    },
+    {
+      "feature": "enfants_5_17",
+      "theme": "Composition",
+      "importance": 0.1705
+    },
+    {
+      "feature": "enfants_moins_5",
+      "theme": "Composition",
+      "importance": 0.1695
+    },
+    {
+      "feature": "type_latrine",
+      "theme": "Eau et hygiène",
+      "importance": 0.1673
+    },
+    {
+      "feature": "nombre_pieces",
+      "theme": "Logement et biens",
+      "importance": 0.1627
+    },
+    {
+      "feature": "lcs_vente_biens_menagers",
+      "theme": "Stratégies d'adaptation",
+      "importance": 0.1574
+    },
+    {
+      "feature": "statut_occupation",
+      "theme": "Logement et biens",
+      "importance": 0.1518
+    },
+    {
+      "feature": "articles_essentiels",
+      "theme": "Logement et biens",
+      "importance": 0.1498
+    },
+    {
+      "feature": "age_chef_menage",
+      "theme": "Profil",
+      "importance": 0.1444
+    },
+    {
+      "feature": "lcs_vente_maison_terre",
+      "theme": "Stratégies d'adaptation",
+      "importance": 0.1432
     },
     {
       "feature": "type_assistance_recue",
-      "importance": 0.001
+      "theme": "Assistance",
+      "importance": 0.1377
+    },
+    {
+      "feature": "membre_disparu_detenu",
+      "theme": "Protection",
+      "importance": 0.1367
+    },
+    {
+      "feature": "part_depenses_alimentation_pct",
+      "theme": "Moyens d'existence",
+      "importance": 0.1219
+    },
+    {
+      "feature": "membres_avec_revenu",
+      "theme": "Moyens d'existence",
+      "importance": 0.113
+    },
+    {
+      "feature": "enfant_non_accompagne_heberge",
+      "theme": "Composition",
+      "importance": 0.0929
+    },
+    {
+      "feature": "membre_maladie_chronique",
+      "theme": "Composition",
+      "importance": 0.0911
+    },
+    {
+      "feature": "source_eau",
+      "theme": "Eau et hygiène",
+      "importance": 0.0625
+    },
+    {
+      "feature": "personnes_60_plus",
+      "theme": "Composition",
+      "importance": 0.0517
+    },
+    {
+      "feature": "sexe_chef_menage",
+      "theme": "Profil",
+      "importance": 0.0392
+    },
+    {
+      "feature": "enfants_non_scolarises",
+      "theme": "Composition",
+      "importance": 0.0346
+    },
+    {
+      "feature": "repas_par_jour",
+      "theme": "Alimentation",
+      "importance": 0.0267
+    },
+    {
+      "feature": "temps_collecte_eau_min",
+      "theme": "Eau et hygiène",
+      "importance": 0.0249
+    },
+    {
+      "feature": "acces_terre_cultivable",
+      "theme": "Logement et biens",
+      "importance": 0.0186
+    },
+    {
+      "feature": "source_eclairage",
+      "theme": "Logement et biens",
+      "importance": 0.0175
+    },
+    {
+      "feature": "vaccination_enfants_a_jour",
+      "theme": "Santé et nutrition",
+      "importance": 0.0175
+    },
+    {
+      "feature": "savon_disponible",
+      "theme": "Eau et hygiène",
+      "importance": 0.0167
+    },
+    {
+      "feature": "possede_betail",
+      "theme": "Logement et biens",
+      "importance": 0.014
+    },
+    {
+      "feature": "instruction_chef",
+      "theme": "Profil",
+      "importance": 0.0106
+    },
+    {
+      "feature": "source_revenu",
+      "theme": "Moyens d'existence",
+      "importance": 0.0075
+    },
+    {
+      "feature": "possede_telephone",
+      "theme": "Logement et biens",
+      "importance": 0.0029
+    }
+  ],
+  "importance_themes": [
+    {
+      "theme": "Alimentation",
+      "importance": 6.5589
+    },
+    {
+      "theme": "Moyens d'existence",
+      "importance": 6.4426
+    },
+    {
+      "theme": "Stratégies d'adaptation",
+      "importance": 4.1982
+    },
+    {
+      "theme": "Composition",
+      "importance": 2.6839
+    },
+    {
+      "theme": "Profil",
+      "importance": 2.0217
+    },
+    {
+      "theme": "Logement et biens",
+      "importance": 1.9963
+    },
+    {
+      "theme": "Protection",
+      "importance": 1.7101
+    },
+    {
+      "theme": "Santé et nutrition",
+      "importance": 1.0831
+    },
+    {
+      "theme": "Assistance",
+      "importance": 0.3793
+    },
+    {
+      "theme": "Eau et hygiène",
+      "importance": 0.2715
     }
   ],
   "variables": [
     "statut_menage",
     "duree_deplacement_mois",
+    "nombre_deplacements_12m",
     "sexe_chef_menage",
     "age_chef_menage",
+    "etat_civil_chef",
+    "instruction_chef",
     "taille_menage",
     "enfants_moins_5",
+    "enfants_5_17",
+    "personnes_60_plus",
+    "enfants_non_scolarises",
+    "femme_enceinte_allaitante",
     "membre_handicap",
     "membre_maladie_chronique",
-    "femme_enceinte_allaitante",
     "enfant_non_accompagne_heberge",
     "type_logement",
+    "statut_occupation",
+    "nombre_pieces",
     "articles_essentiels",
+    "possede_betail",
+    "acces_terre_cultivable",
+    "toit_etanche",
+    "source_eclairage",
+    "possede_telephone",
+    "source_eau",
+    "temps_collecte_eau_min",
+    "type_latrine",
+    "savon_disponible",
+    "enfant_malade_2_semaines",
+    "acces_soins",
+    "vaccination_enfants_a_jour",
+    "enfant_malnutrition_depiste",
+    "jours_cereales",
+    "jours_legumineuses",
+    "jours_lait",
+    "jours_viande_poisson",
+    "jours_legumes",
+    "jours_fruits",
+    "jours_huile",
+    "jours_sucre",
+    "stock_nourriture_jours",
     "repas_par_jour",
     "jours_sans_nourriture_7j",
+    "rcsi_aliments_moins_chers",
+    "rcsi_emprunt_nourriture",
+    "rcsi_reduction_portions",
+    "rcsi_adultes_pour_enfants",
+    "rcsi_moins_de_repas",
+    "lcs_emprunt_argent",
+    "lcs_vente_biens_menagers",
+    "lcs_consommation_semences",
+    "lcs_reduction_depenses_sante",
+    "lcs_retrait_enfants_ecole",
+    "lcs_vente_derniere_femelle",
+    "lcs_vente_maison_terre",
+    "lcs_mendicite",
+    "lcs_travail_enfants",
     "source_revenu",
-    "possede_betail",
+    "membres_avec_revenu",
+    "perte_revenu_6_mois",
+    "revenu_30j_usd",
+    "part_depenses_alimentation_pct",
+    "dette_usd",
+    "epargne_disponible",
+    "incident_securite_3_mois",
+    "biens_perdus_crise",
+    "membre_disparu_detenu",
+    "documents_identite",
+    "restriction_mouvements",
     "assistance_3_derniers_mois",
     "type_assistance_recue"
   ]
