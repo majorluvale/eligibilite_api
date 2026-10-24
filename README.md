@@ -4,15 +4,16 @@ Backend FastAPI qui :
 
 1. **reçoit une copie de chaque soumission KoboToolbox** (REST Service / webhook) ;
 2. **prédit l'éligibilité du ménage** avec un modèle XGBoost entraîné sur les décisions de la **vérification approfondie** (visite à domicile et comité de ciblage), à partir des 72 réponses de l'enquête ménage. La grille Excel de l'ONG, son score et son seuil ne sont **pas** donnés au modèle ;
-3. **explique la décision** : effet de chaque réponse et de chaque thème du questionnaire (contributions SHAP) ;
-4. permet à un·e superviseur·e de **voir les données du ménage et la décision, puis de l'approuver ou de la désapprouver**. Un commentaire est obligatoire en cas de désaccord, et chaque revue est historisée ;
-5. **sélectionne les ménages à servir quand le budget est limité**, par indice de priorité du modèle, au global ou par zone.
+3. **propose le type d'assistance idéale** avec un second modèle (vivres, moyens d'existence, abri et articles ménagers, éducation, santé et nutrition, eau et hygiène, protection) ;
+4. **explique les décisions** : effet de chaque réponse et de chaque thème du questionnaire (contributions SHAP) ;
+5. permet à un·e superviseur·e de **voir les données du ménage et la décision, puis de l'approuver ou de la désapprouver**. Un commentaire est obligatoire en cas de désaccord, et chaque revue est historisée ;
+6. **sélectionne les ménages à servir quand le budget est limité**, par indice de priorité du modèle, au global ou par zone, et si besoin pour un seul type d'assistance.
 
 ```
 KoboCollect ──soumission──▶ KoboToolbox ──REST Service (JSON)──▶ POST /api/kobo/webhook
                                                                      │
                                        schema.py : questions du formulaire = variables du modèle
-                                       modèle    : XGBoost (72 variables) + explication SHAP
+                                       modèles   : éligibilité + type d'assistance (XGBoost) + SHAP
                                                                      ▼
                                      base de données (SQLite / Postgres) ──▶ /dashboard
                                                                                ├─ liste, filtres, zone grise
@@ -34,7 +35,8 @@ KoboCollect ──soumission──▶ KoboToolbox ──REST Service (JSON)─�
 | Chemin | Rôle |
 |---|---|
 | `app/schema.py` | **Source unique** des questions : nom, libellé, choix, thème, questions conditionnelles, contrôles de cohérence |
-| `app/ml.py` | Modèle XGBoost, prédiction et explication SHAP (par réponse et par thème) |
+| `app/ml.py` | Modèles XGBoost (éligibilité, type d'assistance), prédiction et explication SHAP |
+| `app/indicateurs.py` | Indicateurs standard calculés sur les réponses (FCS, rCSI, revenu par personne…) pour le modèle du type d'assistance |
 | `app/main.py` | Routes API + dashboard |
 | `training/train.py` | Entraînement reproductible (même préparation et mêmes paramètres que le notebook v6) |
 | `model/` | Modèle déployé (`model.joblib`) et métriques (`metadata.json`) |
@@ -88,11 +90,32 @@ Résultats sur le jeu de test (10 000 ménages, mêmes ménages pour les trois m
 
 Les données sont simulées : sur de vraies décisions de vérification, qui contiennent plus de jugement, les scores seront plus bas, et la revue humaine prend tout son sens.
 
-Ré-entraîner (les données v6 sont générées automatiquement si elles sont absentes) :
+## Le type d'assistance idéale (second modèle)
+
+Analyse complète : `notebooks/assistance_ideale_v6.ipynb` (classification multi classe, comme prévu dans le mémoire).
+
+- **Cible** : le besoin principal relevé par le comité de ciblage pour chaque ménage visité (colonne `assistance_ideale`), parmi 7 types : vivres / cash alimentaire, moyens d'existence, abri et articles ménagers essentiels, éducation, santé et nutrition, eau, hygiène et assainissement, protection.
+- **Variables** : les mêmes 72 réponses, plus 5 indicateurs standard calculés sur ces réponses (`app/indicateurs.py`) : score de consommation alimentaire (FCS), indice réduit des stratégies d'adaptation (rCSI), revenu par personne, part des enfants non scolarisés, dette rapportée au revenu. Pas de grille, pas de données externes.
+- **Modèle** : XGBoost (1 000 arbres de profondeur 4, paramètres choisis par GridSearchCV), comparé à KNN, régression logistique, SVM, arbre de décision et Random Forest.
+
+| Jeu de test (10 000 ménages) | Accuracy | F1 (macro) |
+|---|---|---|
+| Régression logistique | 70,6 % | 72,4 % |
+| Random Forest | 79,5 % | 78,8 % |
+| **XGBoost (déployé)** | **97,0 %** | **97,1 %** |
+| XGBoost, ménages éligibles seulement | 95,9 % | 95,5 % |
+
+- Chaque type d'assistance a un F1 d'au moins 95,8 %. En validation croisée (5 parties), le score ne descend jamais sous 96,4 %.
+- Dans 99,8 % des cas, l'assistance retenue par le comité est parmi les 2 premières propositions du modèle : le dashboard affiche la proposition principale **et** les alternatives.
+- Pour un ménage éligible, c'est l'assistance proposée. Pour un ménage non éligible, c'est son besoin principal, utile pour l'orienter vers un partenaire.
+- La page **Sélection** peut réserver une liste à un type d'assistance (par exemple une distribution de kits scolaires : seuls les éligibles dont le besoin principal est l'éducation sont classés).
+
+Ré-entraîner les deux modèles (les données v6 sont générées automatiquement si elles sont absentes) :
 
 ```bash
 python -m training.train                          # données v6, avec validation croisée (quelques minutes)
 python -m training.train --data mes_menages.csv   # vos propres données : questions de schema.py + eligible (0/1)
+                                                  # + assistance_ideale (facultatif : codes de schema.ASSISTANCES)
 ```
 
 ## Lancer en local
@@ -149,13 +172,13 @@ Limite du plan gratuit : le service s'endort après 15 minutes sans trafic, et l
 | Méthode | Route | Auth | Rôle |
 |---|---|---|---|
 | POST | `/api/kobo/webhook` | jeton | Réception d'une soumission Kobo |
-| POST | `/api/predict` | — | Prédiction + explication (par réponse et par thème), sans enregistrement |
+| POST | `/api/predict` | — | Éligibilité + type d'assistance idéale + explications, sans enregistrement |
 | GET | `/api/modele` | — | Métriques et paramètres du modèle |
 | GET | `/api/beneficiaires` | Basic | Liste (`statut`, `decision`, `limit`, `offset`) |
 | GET | `/api/beneficiaires/{id}` | Basic | Détail : réponses, explication, historique des revues |
 | POST | `/api/beneficiaires/{id}/revision` | Basic | `{"approuve": false, "commentaire": "..."}` |
 | POST | `/api/kobo/sync` | Basic | Import des soumissions via l'API Kobo |
-| POST | `/api/selections` | Basic | `{"nombre": 3000, "repartition": "globale" \| "proportionnelle_zone", "inclure_non_revus": true, "nom": "..."}` |
+| POST | `/api/selections` | Basic | `{"nombre": 3000, "repartition": "globale" \| "proportionnelle_zone", "inclure_non_revus": true, "assistance": "education" (facultatif), "nom": "..."}` |
 | GET | `/api/selections/{id}` | Basic | Liste retenue, classée par score estimé |
 | GET | `/health` | — | Supervision |
 

@@ -23,6 +23,13 @@
       <label class="field">Nombre de ménages que le budget permet d'assister
         <input class="input" type="number" name="nombre" min="1" required placeholder="Ex. 3000">
       </label>
+      <label class="field">Type d'assistance
+        <select class="input" name="assistance">
+          <option value="">Tous les ménages éligibles</option>
+          {% for code, lib in ASSISTANCES.items() %}<option value="{{ code }}">{{ lib }}</option>{% endfor %}
+        </select>
+        <small class="muted">Pour une distribution d'un seul type (ex. kits scolaires), ne classer que les éligibles dont c'est le besoin principal.</small>
+      </label>
       <label class="choice">
         <input type="radio" name="repartition" value="globale" checked>
         <span><strong>Les plus prioritaires, toutes zones confondues</strong>
@@ -55,7 +62,7 @@
 <h2 class="mt">Listes déjà produites</h2>
 <div class="table-scroll">
 <table class="list">
-  <thead><tr><th>Liste</th><th>Date</th><th>Par</th><th class="num">Retenus</th><th class="num">Éligibles</th><th class="num">Couverture</th><th>Répartition</th></tr></thead>
+  <thead><tr><th>Liste</th><th>Date</th><th>Par</th><th class="num">Retenus</th><th class="num">Éligibles</th><th class="num">Couverture</th><th>Répartition</th><th>Assistance</th></tr></thead>
   <tbody>
   {% for s in historique %}
     <tr onclick="location.href='/dashboard/selections/{{ s.id }}'">
@@ -66,9 +73,10 @@
       <td class="num">{{ s.nb_eligibles }}</td>
       <td class="num">{{ (s.nb_retenus / s.nb_eligibles)|pct }}</td>
       <td>{{ 'par zone' if s.repartition == 'proportionnelle_zone' else 'globale' }}</td>
+      <td class="small">{{ ASSISTANCES[s.assistance] if s.assistance else 'tous types' }}</td>
     </tr>
   {% else %}
-    <tr class="empty"><td colspan="7">Aucune sélection pour l'instant.</td></tr>
+    <tr class="empty"><td colspan="8">Aucune sélection pour l'instant.</td></tr>
   {% endfor %}
   </tbody>
 </table>

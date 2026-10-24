@@ -227,6 +227,16 @@ CATEGORICAL = [n for n in FEATURE_NAMES if FEATURES_BY_NAME[n].kind == "categori
 NUMERIC = [n for n in FEATURE_NAMES if FEATURES_BY_NAME[n].kind == "integer"]
 SHORT_LABELS = {f.name: f.short for f in FEATURES}
 THEMES = {f.name: f.theme for f in FEATURES}
+# Types d'assistance que le second modèle peut recommander (besoin principal du ménage)
+ASSISTANCES = {
+    "vivres": "Vivres / cash alimentaire",
+    "moyens_existence": "Moyens d'existence (semences, activité génératrice de revenu)",
+    "abri_ame": "Abri et articles ménagers essentiels",
+    "education": "Éducation (kits et frais scolaires)",
+    "sante_nutrition": "Santé et nutrition",
+    "eau_hygiene": "Eau, hygiène et assainissement",
+    "protection": "Protection",
+}
 ZONE_FIELD = "localite"  # question utilisée pour la répartition du budget par zone
 
 # Questions d'identification : stockées et affichées, jamais utilisées par le modèle.

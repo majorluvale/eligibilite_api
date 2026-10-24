@@ -13,6 +13,9 @@ Processus simulé :
    personne, charge de dépendance, logement, santé, protection. Ces éléments se combinent
    (un revenu faible pèse plus lourd dans un grand ménage sans réserves), ce qu'une grille
    de points additionnés ne peut pas représenter.
+4. Le comité relève aussi le **besoin principal** du ménage, donc le type d'assistance idéal
+   (`assistance_ideale`) : vivres, moyens d'existence, abri et articles ménagers, éducation,
+   santé et nutrition, eau et hygiène, ou protection.
 
 Le modèle apprend la décision de la vérification à partir des réponses seules : ni la grille,
 ni son score, ni son seuil ne lui sont donnés. Les données sont simulées : pas de GPS ni de
@@ -189,8 +192,9 @@ def generer(n: int = N_MENAGES, graine: int = GRAINE) -> pd.DataFrame:
     d["score_grille_excel"], _, d["decision_grille_excel"] = grille_v5.feuille_excel(d)
     d["besoin"] = besoin_verifie(d) + rng.normal(0, BRUIT_COMITE, n)
     d["eligible"] = (d["besoin"] >= d["besoin"].quantile(1 - PART_ELIGIBLES)).astype(int)
+    d["assistance_ideale"] = assistance_ideale(d, rng)
     colonnes = ["id_menage", "date_enquete", "enqueteur"] + [f.name for f in FEATURES]
-    return d[colonnes + ["score_grille_excel", "decision_grille_excel", "eligible"]]
+    return d[colonnes + ["score_grille_excel", "decision_grille_excel", "eligible", "assistance_ideale"]]
 
 
 def indicateurs(d: pd.DataFrame) -> pd.DataFrame:
@@ -242,6 +246,52 @@ def besoin_verifie(d: pd.DataFrame) -> pd.Series:
               + 0.55 * adaptation + 0.50 * logement + 0.45 * sante + 0.50 * fragilite + 0.55 * crise
               + 0.35 * alimentation * crise - 0.25 * aide * alimentation)
     return besoin
+
+
+# Pondération des secteurs : le comité recommande l'assistance du secteur où le besoin est le plus fort
+POIDS_SECTEURS = {"vivres": 0.95, "moyens_existence": 0.95, "abri_ame": 1.00, "education": 0.95,
+                  "sante_nutrition": 1.08, "eau_hygiene": 1.00, "protection": 1.05}
+BRUIT_SECTEURS = 0.0  # le jugement du comité est déjà dans la décision d'éligibilité
+
+
+def besoins_par_secteur(d: pd.DataFrame) -> pd.DataFrame:
+    """Intensité du besoin dans chaque secteur, telle que le comité l'apprécie (une colonne par type d'assistance)."""
+    i = indicateurs(d)
+    oui_ = lambda c: (d[c] == "oui").astype(float)
+    sig = lambda x: 1 / (1 + np.exp(-x))
+    aide_alimentaire = d["type_assistance_recue"].isin(["vivres", "cash"]).astype(float)
+    enfants = d["enfants_5_17"].to_numpy()
+    s = pd.DataFrame(index=d.index)
+    s["vivres"] = sig((35 - i["fcs"]) / 5) + 0.5 * np.clip(i["rcsi"] / 25, 0, 1.4) + 0.3 * d["jours_sans_nourriture_7j"] / 7 \
+        + 0.3 * np.exp(-d["stock_nourriture_jours"] / 10) - 0.5 * aide_alimentaire
+    s["moyens_existence"] = sig((9 - i["revenu_par_personne"]) / 3) * (0.4 + 0.6 * (d["epargne_disponible"] == "non")) \
+        + 0.5 * oui_("perte_revenu_6_mois") + 0.3 * np.clip(d["dette_usd"] / (d["revenu_30j_usd"] + 20), 0, 3) / 3 \
+        + 0.4 * (oui_("lcs_consommation_semences") + oui_("lcs_vente_derniere_femelle") + oui_("lcs_vente_maison_terre")).clip(upper=1)
+    s["abri_ame"] = d["type_logement"].map({"sans_abri": 1.2, "abri_fortune": 0.9, "heberge_famille": 0.4,
+                                           "maison_endommagee": 0.4, "maison_correcte": 0.0}) \
+        + 0.3 * (d["toit_etanche"] == "non") + 0.5 * (5 - d["articles_essentiels"]) / 5 + 0.2 * (d["statut_occupation"] == "site_deplaces")
+    s["education"] = np.where(enfants > 0, 1.4 * d["enfants_non_scolarises"] / np.maximum(enfants, 1)
+                              + 0.5 * oui_("lcs_retrait_enfants_ecole") + 0.4 * oui_("lcs_travail_enfants"), 0)
+    s["sante_nutrition"] = 1.0 * oui_("enfant_malnutrition_depiste") + 0.45 * oui_("enfant_malade_2_semaines") \
+        + 0.35 * d["acces_soins"].isin(["non_cout", "non_distance", "non_insecurite"]) + 0.3 * (d["vaccination_enfants_a_jour"] == "non") \
+        + 0.25 * (oui_("membre_handicap") + oui_("membre_maladie_chronique")).clip(upper=1)
+    s["eau_hygiene"] = 0.55 * d["source_eau"].isin(["source_non_protegee", "eau_surface"]) + 0.35 * np.clip(d["temps_collecte_eau_min"] / 90, 0, 1.5) \
+        + 0.45 * (d["type_latrine"] == "aucune") + 0.3 * (d["savon_disponible"] == "non")
+    s["protection"] = 0.5 * oui_("incident_securite_3_mois") + 0.8 * oui_("membre_disparu_detenu") + 0.7 * oui_("enfant_non_accompagne_heberge") \
+        + 0.3 * oui_("biens_perdus_crise") + 0.3 * (d["documents_identite"] == "non") + 0.3 * oui_("restriction_mouvements") \
+        + 0.8 * (d["age_chef_menage"] < 18)
+    return s * pd.Series(POIDS_SECTEURS)
+
+
+def assistance_ideale(d: pd.DataFrame, rng) -> pd.Series:
+    """Type d'assistance qui répond au besoin principal du ménage, relevé par le comité pour tous les ménages visités.
+
+    Pour un ménage éligible, c'est l'assistance à lui donner ; pour un ménage non éligible, c'est
+    son besoin principal (utile pour une orientation vers un autre partenaire).
+    """
+    s = besoins_par_secteur(d)
+    s = s + rng.normal(0, BRUIT_SECTEURS, s.shape)
+    return s.idxmax(axis=1)
 
 
 def construire_base(d: pd.DataFrame, chemin_db: Path, chemin_csv: Path) -> None:

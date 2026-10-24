@@ -1,8 +1,12 @@
-"""Chargement du modèle, prédiction et explicabilité.
+"""Chargement des modèles, prédiction et explicabilité.
 
-Un seul modèle XGBoost, entraîné sur les décisions de la vérification approfondie à partir
-des réponses de l'enquête ménage (voir notebooks/ciblage_avec_ml_v6.ipynb). La grille Excel
-de l'ONG, son score et son seuil ne sont pas donnés au modèle.
+Deux modèles XGBoost, entraînés à partir des réponses de l'enquête ménage :
+1. **éligibilité** (binaire) : décision de la vérification approfondie
+   (voir notebooks/ciblage_avec_ml_v6.ipynb) ;
+2. **type d'assistance idéale** (7 classes) : besoin principal relevé par le comité, avec en plus
+   les indicateurs standard calculés sur les réponses (app/indicateurs.py ;
+   voir notebooks/assistance_ideale_v6.ipynb).
+La grille Excel de l'ONG, son score et son seuil ne sont donnés à aucun des deux modèles.
 
 Préparation identique au notebook : questions conditionnelles non posées -> -1 (nombres) ou
 "non_applicable" (choix), puis codage des choix comme le LabelEncoder (ordre alphabétique).
@@ -21,11 +25,14 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 
-from .schema import CATEGORICAL, FEATURE_NAMES, NUMERIC, SHORT_LABELS, THEMES, libelle
+from . import indicateurs
+from .schema import ASSISTANCES, CATEGORICAL, FEATURE_NAMES, NUMERIC, SHORT_LABELS, THEMES, libelle
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "model"
 NON_APPLICABLE_CHOIX = "non_applicable"
 NON_APPLICABLE_NOMBRE = -1.0
+VARIABLES_ASSISTANCE = FEATURE_NAMES + list(indicateurs.INDICATEURS)
+LIBELLES_ASSISTANCE = {**SHORT_LABELS, **indicateurs.INDICATEURS}
 
 
 def prepare(rows) -> pd.DataFrame:
@@ -50,6 +57,11 @@ def encoder(df: pd.DataFrame, encodeurs: dict[str, list[str]]) -> np.ndarray:
     return X.to_numpy(dtype=float)
 
 
+def encoder_assistance(df: pd.DataFrame, encodeurs: dict[str, list[str]]) -> np.ndarray:
+    """Matrice du modèle d'assistance : réponses encodées + indicateurs (ordre de VARIABLES_ASSISTANCE)."""
+    return np.hstack([encoder(df, encodeurs), indicateurs.calculer(df).to_numpy()])
+
+
 class EligibilityModel:
     priority_method = "log_odds"
 
@@ -60,6 +72,8 @@ class EligibilityModel:
         self.metadata = artifact["metadata"]
         self.zone_grise = tuple(self.metadata.get("zone_grise", {}).get("probabilite", (0.2, 0.8)))
         self._booster = self.modele.get_booster()
+        self.modele_assistance = artifact.get("modele_assistance")
+        self.classes_assistance = list(artifact.get("classes_assistance", []))
 
     @property
     def version(self) -> str:
@@ -86,6 +100,30 @@ class EligibilityModel:
         bas, haut = self.zone_grise
         return (proba > bas) & (proba < haut)
 
+    def assistance(self, df: pd.DataFrame) -> list[dict | None]:
+        """Type d'assistance idéale de chaque ménage : proposition, alternatives et réponses qui l'expliquent."""
+        if self.modele_assistance is None:
+            return [None] * len(df)
+        ind = indicateurs.calculer(df)
+        X = np.hstack([encoder(df, self.encodeurs), ind.to_numpy()])
+        proba = self.modele_assistance.predict_proba(X)
+        contrib = self.modele_assistance.get_booster().predict(xgb.DMatrix(X), pred_contribs=True)  # [n, classes, variables + 1]
+        out = []
+        for i in range(len(df)):
+            ordre = np.argsort(-proba[i])
+            k = int(ordre[0])
+            facteurs = sorted(range(len(VARIABLES_ASSISTANCE)), key=lambda j: -contrib[i, k, j])[:4]
+            out.append({
+                "code": self.classes_assistance[k], "libelle": ASSISTANCES[self.classes_assistance[k]],
+                "probabilite": round(float(proba[i, k]), 4),
+                "alternatives": [{"code": self.classes_assistance[j], "libelle": ASSISTANCES[self.classes_assistance[j]],
+                                  "probabilite": round(float(proba[i, j]), 4)} for j in ordre[1:3]],
+                "facteurs": [{"feature": VARIABLES_ASSISTANCE[j], "label": LIBELLES_ASSISTANCE[VARIABLES_ASSISTANCE[j]],
+                              "value": valeur_affichee(df.iloc[i], ind.iloc[i], VARIABLES_ASSISTANCE[j]),
+                              "contribution": round(float(contrib[i, k, j]), 4)} for j in facteurs if contrib[i, k, j] > 0],
+            })
+        return out
+
     def predict(self, features: dict) -> dict:
         df = prepare([features])
         contrib, base = self.contributions(df)
@@ -111,10 +149,19 @@ class EligibilityModel:
             "explanation": explanation,
             "themes": par_theme(explanation),
             "summary": summarize(explanation, eligible, proba, self.threshold),
+            "assistance": self.assistance(df)[0],
             "model_version": self.version,
             "indice_priorite": round(log_odds, 4),
             "methode_priorite": self.priority_method,
         }
+
+
+def valeur_affichee(ligne: pd.Series, ind: pd.Series, name: str) -> str:
+    if name in indicateurs.INDICATEURS:
+        v = float(ind[name])
+        return f"{v:.0%}" if name == "part_non_scolarises" else f"{v:.1f}".replace(".", ",")
+    v = ligne[name]
+    return libelle(name, None if v in (NON_APPLICABLE_CHOIX, NON_APPLICABLE_NOMBRE) else v)
 
 
 def par_theme(explanation: list[dict]) -> list[dict]:

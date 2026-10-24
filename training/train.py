@@ -1,11 +1,13 @@
-"""Entraînement reproductible du modèle déployé (données v6 : enquête ménage, vérification approfondie).
+"""Entraînement reproductible des modèles déployés (données v6 : enquête ménage, vérification approfondie).
 
 Usage :
     python -m training.train                       # données v6 (générées si absentes)
     python -m training.train --data mes_menages.csv
 
 Le fichier doit contenir les questions de app/schema.py et la décision de la vérification
-(`eligible`, 0/1). La grille Excel de l'ONG n'est pas utilisée pour entraîner le modèle :
+(`eligible`, 0/1). S'il contient aussi le besoin principal relevé par le comité (`assistance_ideale`,
+codes de schema.ASSISTANCES), le second modèle (type d'assistance idéale) est entraîné.
+La grille Excel de l'ONG n'est utilisée par aucun des deux modèles :
 si les colonnes `decision_grille_excel` / `score_grille_excel` sont présentes, elles servent
 seulement de point de comparaison.
 
@@ -14,6 +16,8 @@ Même préparation et mêmes paramètres que notebooks/ciblage_avec_ml_v6.ipynb 
 - choix codés comme le LabelEncoder (ordre alphabétique) ;
 - découpage 80 % entraînement / 10 % validation / 10 % test, stratifié, random_state=42 ;
 - XGBoost avec les paramètres trouvés par GridSearchCV dans le notebook, seuil 0,5.
+Modèle du type d'assistance : comme notebooks/assistance_ideale_v6.ipynb (réponses + indicateurs
+standard de app/indicateurs.py, découpage stratifié sur le type d'assistance).
 Pas de normalisation : elle ne change rien pour un modèle à base d'arbres.
 """
 from __future__ import annotations
@@ -38,8 +42,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "notebooks"))
 
-from app.ml import EligibilityModel, encoder, prepare  # noqa: E402
-from app.schema import CATEGORICAL, FEATURE_NAMES, FEATURES_BY_NAME, THEMES  # noqa: E402
+from app.ml import VARIABLES_ASSISTANCE, EligibilityModel, encoder, encoder_assistance, prepare  # noqa: E402
+from app.schema import ASSISTANCES, CATEGORICAL, FEATURE_NAMES, FEATURES_BY_NAME, THEMES  # noqa: E402
 
 DONNEES_V6 = ROOT / "notebooks" / "data" / "ciblage_v6.csv"
 SEED = 42
@@ -47,6 +51,8 @@ SEUIL = 0.5
 ZONE_GRISE = (0.2, 0.8)
 XGB_PARAMS = dict(n_estimators=3000, max_depth=3, learning_rate=0.05, subsample=0.8, colsample_bytree=0.8,
                   random_state=SEED)
+XGB_ASSISTANCE = dict(n_estimators=1000, max_depth=4, learning_rate=0.05, subsample=0.8, colsample_bytree=0.8,
+                      random_state=SEED)
 
 
 def charger(chemin: Path) -> pd.DataFrame:
@@ -65,6 +71,48 @@ def mesures(y, pred, proba=None) -> dict:
         m["pr_auc"] = round(average_precision_score(y, proba), 4)
     m["matrice_confusion"] = {"vn": int(vn), "fp": int(fp), "fn": int(fn), "vp": int(vp)}
     return m
+
+
+def entrainer_assistance(df, X_brut, encodeurs, eligible, cv=True):
+    """Second modèle : type d'assistance idéale (7 classes), entraîné sur tous les ménages visités."""
+    classes = sorted(ASSISTANCES)  # = LabelEncoder().classes_
+    inconnus = set(df["assistance_ideale"].dropna()) - set(classes)
+    if inconnus:
+        raise ValueError(f"assistance_ideale : codes inconnus {sorted(inconnus)} (attendus : {classes})")
+    garder = df["assistance_ideale"].notna().to_numpy()
+    X = encoder_assistance(X_brut, encodeurs)[garder]
+    y = df["assistance_ideale"][garder].map({c: i for i, c in enumerate(classes)}).to_numpy()
+    elig = eligible[garder] == 1
+    idx = np.arange(len(y))
+    i_tr, i_vt = train_test_split(idx, train_size=0.8, stratify=y, random_state=SEED)
+    i_va, i_te = train_test_split(i_vt, train_size=0.5, stratify=y[i_vt], random_state=SEED)
+
+    modele = XGBClassifier(**XGB_ASSISTANCE).fit(X[i_tr], y[i_tr])
+    proba = modele.predict_proba(X[i_te])
+    pred = proba.argmax(1)
+    yt = y[i_te]
+    multi = lambda yy, pp: {"accuracy": round(accuracy_score(yy, pp), 4), "f1_macro": round(f1_score(yy, pp, average="macro"), 4),
+                            "rappel_macro": round(recall_score(yy, pp, average="macro"), 4),
+                            "precision_macro": round(precision_score(yy, pp, average="macro"), 4)}
+    e = elig[i_te]
+    resultat = {
+        "classes": classes, "n_entrainement": len(i_tr), "parametres": {k: v for k, v in XGB_ASSISTANCE.items() if k != "random_state"},
+        "variables": VARIABLES_ASSISTANCE,
+        "repartition": {c: round(float((y == i).mean()), 4) for i, c in enumerate(classes)},
+        "test": multi(yt, pred), "test_eligibles": multi(yt[e], pred[e]),
+        "f1_par_classe": {c: round(float(v), 4) for c, v in zip(classes, f1_score(yt, pred, average=None))},
+        "dans_les_2_propositions": round(float((np.argsort(-proba, 1)[:, :2] == yt[:, None]).any(1).mean()), 4),
+        "matrice_confusion": confusion_matrix(yt, pred).tolist(),
+        "validation_croisee": None,
+    }
+    print(f"Assistance : test {json.dumps(resultat['test'])} | éligibles {json.dumps(resultat['test_eligibles'])}")
+    if cv:
+        r = cross_validate(XGBClassifier(**XGB_ASSISTANCE), X[i_tr], y[i_tr], cv=5,
+                           scoring={"accuracy": "accuracy", "f1_macro": "f1_macro"})
+        resultat["validation_croisee"] = {m: {"moyenne": round(float(r[f"test_{m}"].mean()), 4), "min": round(float(r[f"test_{m}"].min()), 4)}
+                                          for m in ["accuracy", "f1_macro"]}
+        print(f"Assistance, validation croisée : {json.dumps(resultat['validation_croisee'])}")
+    return modele, classes, resultat
 
 
 def main(argv=None) -> dict:
@@ -128,6 +176,11 @@ def main(argv=None) -> dict:
                   "oublies_retrouves_par_le_modele": round(float(pred_te[oublies].mean()), 4),
                   "retenus_a_tort": int(a_tort.sum()), "a_tort_ecartes_par_le_modele": round(float(1 - pred_te[a_tort].mean()), 4)}
 
+    assistance = None
+    if "assistance_ideale" in df:
+        artifact["modele_assistance"], artifact["classes_assistance"], assistance = entrainer_assistance(
+            df, X_brut, encodeurs, y, cv=not args.sans_cv)
+
     contrib, _ = em.contributions(X_brut.iloc[i_te[:5000]])
     moy = np.abs(contrib).mean(0)
     importance = sorted([{"feature": f, "theme": THEMES[f], "importance": round(float(v), 4)} for f, v in zip(FEATURE_NAMES, moy)],
@@ -142,7 +195,7 @@ def main(argv=None) -> dict:
         "n_variables": len(FEATURE_NAMES), "donnees": str(args.data.name),
         "cible": "décision de la vérification approfondie (la grille Excel n'est pas utilisée)",
         "validation_comparaison": comparaison, "test": test, "validation_croisee": validation_croisee,
-        "zone_grise": zone_grise, "grille_excel_test": grille,
+        "zone_grise": zone_grise, "grille_excel_test": grille, "assistance": assistance,
         "priorite": {"methode": "log_odds"},
         "importance_globale": importance,
         "importance_themes": [{"theme": t, "importance": round(float(v), 4)} for t, v in themes.items()],
@@ -150,7 +203,7 @@ def main(argv=None) -> dict:
     }
     artifact["metadata"] = metadata
     args.out.mkdir(parents=True, exist_ok=True)
-    joblib.dump(artifact, args.out / "model.joblib")
+    joblib.dump(artifact, args.out / "model.joblib", compress=3)  # environ 20 Mo au lieu de 60
     (args.out / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Artefacts écrits dans {args.out}")
     return metadata

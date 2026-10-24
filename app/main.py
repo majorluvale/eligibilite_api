@@ -20,7 +20,7 @@ from . import kobo, services
 from .config import get_settings
 from .db import Beneficiary, Selection, get_session, init_db
 from .ml import load_metadata, load_model, par_theme
-from .schema import FEATURES, IDENTITY_FIELDS, SHORT_LABELS, ValidationError, libelle, normalize_features
+from .schema import ASSISTANCES, FEATURES, IDENTITY_FIELDS, SHORT_LABELS, ValidationError, libelle, normalize_features
 from .security import check_csrf, check_webhook_token, csrf_token, current_user
 
 logging.basicConfig(level=logging.INFO)
@@ -48,6 +48,7 @@ app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
 templates.env.globals["SHORT_LABELS"] = SHORT_LABELS
 templates.env.globals["libelle"] = libelle
+templates.env.globals["ASSISTANCES"] = ASSISTANCES
 
 
 def fmt_pct(v):
@@ -101,7 +102,7 @@ def kobo_webhook(payload: dict = Body(...), session: Session = Depends(get_sessi
         log.warning("Soumission Kobo rejetée : %s", e)
         raise HTTPException(422, str(e))
     return {"id": ben.id, "cree": created, "eligible": ben.final_decision, "score": ben.score,
-            "a_verifier": ben.a_verifier}
+            "a_verifier": ben.a_verifier, "assistance_ideale": ben.assistance_code}
 
 
 class PredictionOut(BaseModel):
@@ -114,6 +115,7 @@ class PredictionOut(BaseModel):
     explanation: list[dict]
     themes: list[dict]
     summary: str
+    assistance: dict | None
     model_version: str
     indice_priorite: float
     methode_priorite: str
@@ -294,12 +296,12 @@ def export_csv(session: Session = Depends(get_session), user: str = Depends(curr
     feature_cols = [f.name for f in FEATURES]
     w = csv.writer(buf)
     w.writerow(["id", "kobo_key", *IDENTITY_FIELDS, *feature_cols, "score", "seuil", "decision_modele",
-                "decision_finale", "statut_revue", "revu_par", "commentaire_revue", "model_version"])
+                "decision_finale", "assistance_ideale", "statut_revue", "revu_par", "commentaire_revue", "model_version"])
     for b in session.scalars(select(Beneficiary).order_by(Beneficiary.id)):
         last = b.reviews[0].commentaire if b.reviews else ""
         w.writerow([b.id, b.kobo_key, *(getattr(b, k) or "" for k in IDENTITY_FIELDS),
                     *(b.features.get(c) for c in feature_cols), b.score, b.threshold,
-                    int(b.model_decision), int(b.final_decision), b.statut_revue, b.reviewed_by or "",
+                    int(b.model_decision), int(b.final_decision), b.assistance_code or "", b.statut_revue, b.reviewed_by or "",
                     last or "", b.model_version])
     return StreamingResponse(iter(["﻿" + buf.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=beneficiaires.csv"})
@@ -312,26 +314,29 @@ class SelectionIn(BaseModel):
     nom: str = ""
     repartition: str = "globale"  # ou "proportionnelle_zone"
     inclure_non_revus: bool = True
+    assistance: str | None = None  # réserver la liste à un type d'assistance (codes de schema.ASSISTANCES)
 
 
 def serialize_selection(sel: Selection, details: bool = True) -> dict:
     data = {"id": sel.id, "nom": sel.nom, "date": sel.created_at.isoformat(), "auteur": sel.created_by,
             "nombre_demande": sel.nb_demande, "eligibles": sel.nb_eligibles, "retenus": sel.nb_retenus,
             "repartition": sel.repartition, "inclure_non_revus": sel.inclure_non_revus, "model_version": sel.model_version,
-            "methode_priorite": sel.methode_priorite}
+            "methode_priorite": sel.methode_priorite, "assistance": sel.assistance}
     if details:
         retenus = sorted((i for i in sel.items if i.retenu), key=lambda i: -i.priorite)
         data["menages_retenus"] = [{"rang": n, "rang_dans_la_zone": i.rang if sel.repartition == "proportionnelle_zone" else None,
                                     "id": i.beneficiary_id, "kobo_key": i.beneficiary.kobo_key,
                                     "nom_chef_menage": i.beneficiary.nom_chef_menage, "zone": i.zone,
-                                    "indice_priorite": round(i.priorite, 3)} for n, i in enumerate(retenus, 1)]
+                                    "indice_priorite": round(i.priorite, 3),
+                                    "assistance_ideale": i.beneficiary.assistance_code} for n, i in enumerate(retenus, 1)]
     return data
 
 
 @app.post("/api/selections", tags=["sélection"])
 def api_create_selection(body: SelectionIn, session: Session = Depends(get_session), user: str = Depends(current_user)):
     try:
-        sel = services.creer_selection(session, body.nom, body.nombre, body.repartition, body.inclure_non_revus, user)
+        sel = services.creer_selection(session, body.nom, body.nombre, body.repartition, body.inclure_non_revus, user,
+                                       body.assistance)
     except ValueError as e:
         raise HTTPException(422, str(e))
     return serialize_selection(sel)
@@ -365,11 +370,11 @@ def selections_page(request: Request, err: str | None = None, session: Session =
 
 @app.post("/dashboard/selections", include_in_schema=False)
 def selections_create(nombre: int = Form(...), nom: str = Form(""), repartition: str = Form("globale"),
-                      inclure_non_revus: str | None = Form(None), csrf: str = Form(""),
+                      inclure_non_revus: str | None = Form(None), assistance: str = Form(""), csrf: str = Form(""),
                       session: Session = Depends(get_session), user: str = Depends(current_user)):
     check_csrf(user, csrf)
     try:
-        sel = services.creer_selection(session, nom, nombre, repartition, inclure_non_revus is not None, user)
+        sel = services.creer_selection(session, nom, nombre, repartition, inclure_non_revus is not None, user, assistance)
     except ValueError as e:
         return RedirectResponse(f"/dashboard/selections?{urlencode({'err': str(e)})}", status_code=303)
     return RedirectResponse(f"/dashboard/selections/{sel.id}", status_code=303)
@@ -404,13 +409,14 @@ def selection_export(sel_id: int, session: Session = Depends(get_session), user:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["rang", "rang_dans_la_zone", "id", "kobo_key", "nom_chef_menage", "telephone", "village", "zone",
-                "indice_priorite", "score_eligibilite", "statut_revue", "decision_finale_actuelle", "principaux_facteurs"])
+                "indice_priorite", "score_eligibilite", "assistance_ideale", "statut_revue", "decision_finale_actuelle",
+                "principaux_facteurs"])
     retenus = sorted((i for i in sel.items if i.retenu), key=lambda i: -i.priorite)
     for rang, i in enumerate(retenus, 1):
         b = i.beneficiary
         facteurs = "; ".join(f"{e['label']} = {e['value']}" for e in b.explanation if e["contribution"] > 0)
         w.writerow([rang, i.rang if sel.repartition == "proportionnelle_zone" else "", b.id, b.kobo_key, b.nom_chef_menage or "", b.telephone or "", b.village or "", i.zone,
-                    round(i.priorite, 3), b.score, b.statut_revue, int(b.final_decision), facteurs])
+                    round(i.priorite, 3), b.score, b.assistance_code or "", b.statut_revue, int(b.final_decision), facteurs])
     nom_fichier = f"selection_{sel.id}.csv"
     return StreamingResponse(iter(["﻿" + buf.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": f"attachment; filename={nom_fichier}"})

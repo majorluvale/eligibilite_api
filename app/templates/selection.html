@@ -8,7 +8,8 @@
     <h1>{{ sel.nom }}</h1>
     <p class="muted">Créée par {{ sel.created_by }} le {{ sel.created_at.strftime('%d/%m/%Y à %H:%M') }}
       · {{ 'répartition proportionnelle par zone' if sel.repartition == 'proportionnelle_zone' else 'les plus prioritaires, toutes zones confondues' }}
-      · {{ 'ménages non revus inclus' if sel.inclure_non_revus else 'ménages revus uniquement' }} · classement : {{ "score de grille prédit (ancien modèle)" if sel.methode_priorite == "score_predit" else "indice de priorité du modèle" }} · modèle {{ sel.model_version }}</p>
+      · {{ 'ménages non revus inclus' if sel.inclure_non_revus else 'ménages revus uniquement' }}
+      · {{ 'assistance : ' ~ ASSISTANCES[sel.assistance] if sel.assistance else "tous types d'assistance" }} · classement : {{ "score de grille prédit (ancien modèle)" if sel.methode_priorite == "score_predit" else "indice de priorité du modèle" }} · modèle {{ sel.model_version }}</p>
   </div>
   <div class="actions"><a class="btn" href="/dashboard/selections/{{ sel.id }}/export.csv">Exporter la liste (CSV)</a></div>
 </div>
@@ -62,7 +63,7 @@
 <h2 class="mt">Ménages retenus</h2>
 <div class="table-scroll">
 <table class="list">
-  <thead><tr><th class="num">Rang</th>{% if par_zone %}<th class="num">Rang zone</th>{% endif %}<th>Chef de ménage</th><th>Village</th><th>Zone</th><th class="num">{{ lib }}</th><th>Principaux facteurs</th><th>Revue</th></tr></thead>
+  <thead><tr><th class="num">Rang</th>{% if par_zone %}<th class="num">Rang zone</th>{% endif %}<th>Chef de ménage</th><th>Village</th><th>Zone</th><th class="num">{{ lib }}</th><th>Assistance idéale</th><th>Principaux facteurs</th><th>Revue</th></tr></thead>
   <tbody>
   {% for i in retenus %}
     {% set b = i.beneficiary %}
@@ -73,6 +74,7 @@
       <td>{{ b.village or '—' }}</td>
       <td>{{ i.zone }}</td>
       <td class="num">{{ '%.2f'|format(i.priorite) }}</td>
+      <td class="small">{{ b.assistance.libelle if b.assistance else '—' }}</td>
       {% set top = (b.explanation|selectattr('contribution', 'gt', 0)|list)[:2] %}
       <td class="small">{% for e in top %}{{ e.label }} : {{ e.value }}{% if not loop.last %} · {% endif %}{% endfor %}</td>
       <td>{% if b.statut_revue == 'en_attente' %}<span class="tag">en attente</span>{% elif b.statut_revue == 'confirmee' %}<span class="tag ok">confirmée</span>{% else %}<span class="tag alt">modifiée</span>{% endif %}</td>

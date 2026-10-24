@@ -8,7 +8,7 @@ from . import kobo
 from .config import get_settings
 from .db import Beneficiary, Review, Selection, SelectionItem, utcnow
 from .ml import load_model, prepare
-from .schema import FEATURE_NAMES, normalize_features
+from .schema import ASSISTANCES, FEATURE_NAMES, normalize_features
 
 
 def ingest_submission(session: Session, payload: dict, source: str) -> tuple[Beneficiary, bool]:
@@ -51,6 +51,7 @@ def ingest_submission(session: Session, payload: dict, source: str) -> tuple[Ben
     ben.explanation = result["explanation"]
     ben.summary = result["summary"]
     ben.model_version = result["model_version"]
+    ben.assistance = result["assistance"]
 
     if not created and ben.statut_revue != "en_attente":
         session.add(Review(beneficiary=ben, reviewer="systeme", action="reinitialise",
@@ -107,23 +108,30 @@ def repartir(n: int, effectifs: dict[str, int]) -> dict[str, int]:
 
 
 def creer_selection(session: Session, nom: str, nb: int, repartition: str, inclure_non_revus: bool,
-                    auteur: str) -> Selection:
+                    auteur: str, assistance: str | None = None) -> Selection:
     """Classe les ménages éligibles par indice de priorité et retient les `nb` premiers.
 
     - repartition="globale" : les `nb` ménages les plus prioritaires, toutes zones confondues ;
     - repartition="proportionnelle_zone" : chaque zone reçoit un quota proportionnel à son
       nombre d'éligibles, puis on prend les plus prioritaires dans chaque zone.
+    Avec `assistance`, seuls les éligibles dont le type d'assistance idéale proposé est celui-là sont
+    classés (par exemple une distribution de kits scolaires : assistance="education").
     Ex aequo : le ménage enquêté le plus tôt passe d'abord.
     """
     if nb < 1:
         raise ValueError("Le nombre de ménages à sélectionner doit être au moins 1.")
     if repartition not in ("globale", "proportionnelle_zone"):
         raise ValueError("Répartition inconnue.")
+    assistance = assistance or None
+    if assistance and assistance not in ASSISTANCES:
+        raise ValueError(f"Type d'assistance inconnu : {assistance}.")
     query = select(Beneficiary).where(Beneficiary.final_decision.is_(True))
     if not inclure_non_revus:
         query = query.where(Beneficiary.statut_revue != "en_attente")
     # les ménages évalués avec un ancien questionnaire (autres questions) ne peuvent pas être classés par ce modèle
     eligibles = [b for b in session.scalars(query).all() if all(k in b.features for k in FEATURE_NAMES)]
+    if assistance:
+        eligibles = [b for b in eligibles if b.assistance_code == assistance]
     if not eligibles:
         raise ValueError("Aucun ménage éligible ne correspond à ces critères.")
 
@@ -149,7 +157,7 @@ def creer_selection(session: Session, nom: str, nb: int, repartition: str, inclu
     sel = Selection(nom=nom.strip() or f"Sélection de {nb} ménages", created_by=auteur, nb_demande=nb,
                     nb_eligibles=len(eligibles), nb_retenus=sum(i.retenu for i in items), repartition=repartition,
                     inclure_non_revus=inclure_non_revus, model_version=load_model(get_settings().model_dir).version,
-                    methode_priorite=methode, items=items)
+                    methode_priorite=methode, assistance=assistance, items=items)
     session.add(sel)
     session.commit()
     return sel
@@ -198,6 +206,7 @@ def serialize(ben: Beneficiary, with_details: bool = True) -> dict:
         "seuil": ben.threshold,
         "decision_modele": "eligible" if ben.model_decision else "non_eligible",
         "decision_finale": "eligible" if ben.final_decision else "non_eligible",
+        "assistance_ideale": ben.assistance_code,
         "statut_revue": ben.statut_revue,
         "a_verifier": ben.a_verifier,
         "reviewed_by": ben.reviewed_by,
@@ -208,6 +217,7 @@ def serialize(ben: Beneficiary, with_details: bool = True) -> dict:
             "reponses": ben.features,
             "explication": ben.explanation,
             "resume": ben.summary,
+            "assistance": ben.assistance,
             "valeur_de_base": ben.base_value,
             "revues": [{
                 "reviewer": r.reviewer, "action": r.action, "commentaire": r.commentaire,

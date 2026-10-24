@@ -75,9 +75,41 @@
   {% endif %}
 </section>
 
+{% if m.assistance %}
+{% set a = m.assistance %}
 <section class="two-col">
   <div class="card">
-    <h2>Importance par thème</h2>
+    <h2>Second modèle : type d'assistance idéale</h2>
+    <p class="small">À partir des mêmes réponses (et des indicateurs FCS, rCSI, revenu par personne… calculés sur ces réponses),
+      un second XGBoost propose le type d'assistance qui répond au besoin principal du ménage, parmi {{ a.classes|length }} types.
+      Il a appris le besoin principal relevé par le comité sur {{ a.n_entrainement }} ménages.</p>
+    <table class="list compact">
+      <tbody>
+        <tr><td>Accuracy (test)</td><td class="num"><strong>{{ a.test.accuracy|pct }}</strong></td></tr>
+        <tr><td>F1 score moyen des types (macro)</td><td class="num"><strong>{{ a.test.f1_macro|pct }}</strong></td></tr>
+        <tr><td>Accuracy sur les ménages éligibles</td><td class="num">{{ a.test_eligibles.accuracy|pct }}</td></tr>
+        <tr><td>Besoin du comité parmi les 2 propositions du modèle</td><td class="num">{{ a.dans_les_2_propositions|pct }}</td></tr>
+        {% if a.validation_croisee %}<tr><td>Pire accuracy en validation croisée (5 parties)</td><td class="num">{{ a.validation_croisee.accuracy.min|pct }}</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h2>Score par type d'assistance (test)</h2>
+    <table class="list compact">
+      <thead><tr><th>Type d'assistance</th><th class="num">Part des ménages</th><th class="num">F1</th></tr></thead>
+      <tbody>
+      {% for code in a.classes %}
+        <tr><td>{{ ASSISTANCES[code] }}</td><td class="num">{{ a.repartition[code]|pct }}</td><td class="num">{{ a.f1_par_classe[code]|pct }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="two-col">
+  <div class="card">
+    <h2>Éligibilité : importance par thème</h2>
     <p class="muted small">Effet moyen (en valeur absolue, log-odds) des réponses de chaque thème sur la décision, mesuré sur le jeu de test.</p>
     <div class="imp">
       {% for r in m.importance_themes %}
@@ -90,7 +122,7 @@
     </div>
   </div>
   <div class="card">
-    <h2>Les 20 questions les plus importantes</h2>
+    <h2>Éligibilité : les 20 questions les plus importantes</h2>
     <div class="imp">
       {% for r in importance %}
       <div class="irow">

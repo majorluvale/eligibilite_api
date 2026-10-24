@@ -147,6 +147,36 @@ def test_pas_de_grille_dans_le_modele(client):
         assert meta["test"][m] >= 0.95, m
 
 
+def test_type_assistance_ideale(client):
+    from app.schema import ASSISTANCES
+    r = client.post("/api/predict", json=KOBO_PAYLOAD).json()
+    a = r["assistance"]
+    assert a["code"] in ASSISTANCES and a["libelle"] == ASSISTANCES[a["code"]]
+    assert len(a["alternatives"]) == 2 and a["probabilite"] >= max(x["probabilite"] for x in a["alternatives"])
+    assert a["probabilite"] + sum(x["probabilite"] for x in a["alternatives"]) <= 1.0001
+    assert a["facteurs"] and all(f["contribution"] > 0 for f in a["facteurs"])
+    # ménage dont le besoin principal est clairement l'éducation : 3 enfants sur 3 hors de l'école, retirés et au travail
+    scolaire = {**NON_VULNERABLE, "enfants_5_17": 3, "taille_menage": 6, "enfants_non_scolarises": 3,
+                "lcs_retrait_enfants_ecole": "oui", "lcs_travail_enfants": "oui"}
+    assert client.post("/api/predict", json=scolaire).json()["assistance"]["code"] == "education"
+    meta = client.get("/api/modele").json()["assistance"]
+    assert meta["classes"] == sorted(ASSISTANCES)
+    assert meta["test"]["accuracy"] >= 0.95 and meta["test"]["f1_macro"] >= 0.95
+
+
+def test_migration_ajoute_les_nouvelles_colonnes(tmp_path):
+    from sqlalchemy import create_engine, inspect, text
+    from app.db import ajouter_colonnes_manquantes
+    engine = create_engine(f"sqlite:///{tmp_path / 'ancienne.db'}")
+    with engine.begin() as con:  # tables d'une version précédente, sans les colonnes « assistance »
+        con.execute(text("CREATE TABLE beneficiaires (id INTEGER PRIMARY KEY)"))
+        con.execute(text("CREATE TABLE selections (id INTEGER PRIMARY KEY)"))
+    ajouter_colonnes_manquantes(engine)
+    ajouter_colonnes_manquantes(engine)  # sans effet la deuxième fois
+    for table in ("beneficiaires", "selections"):
+        assert "assistance" in {c["name"] for c in inspect(engine).get_columns(table)}
+
+
 def test_human_override_and_audit_trail(client):
     ben_id = client.get("/api/beneficiaires", headers=auth()).json()[0]["id"]
     r = client.post(f"/api/beneficiaires/{ben_id}/revision", json={"approuve": False}, headers=auth())

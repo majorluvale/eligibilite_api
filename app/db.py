@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 from .config import get_settings
@@ -46,6 +46,8 @@ class Beneficiary(Base):
     explanation: Mapped[list] = mapped_column(JSON)
     summary: Mapped[str] = mapped_column(Text)
     model_version: Mapped[str] = mapped_column(String(50))
+    # type d'assistance idéale proposé par le second modèle : code, libellé, probabilité, alternatives, facteurs
+    assistance: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # décision finale = décision du modèle, sauf si un humain l'a désapprouvée
     final_decision: Mapped[bool] = mapped_column(Boolean, index=True)
@@ -60,6 +62,10 @@ class Beneficiary(Base):
     def zone(self) -> str | None:
         """Zone utilisée pour répartir le budget (question `localite` du formulaire)."""
         return (self.features or {}).get(ZONE_FIELD)
+
+    @property
+    def assistance_code(self) -> str | None:
+        return (self.assistance or {}).get("code")
 
     @property
     def indice(self) -> float:
@@ -97,6 +103,7 @@ class Selection(Base):
     inclure_non_revus: Mapped[bool] = mapped_column(Boolean)
     model_version: Mapped[str] = mapped_column(String(50))
     methode_priorite: Mapped[str] = mapped_column(String(20))  # "log_odds" (anciennes listes : "score_predit")
+    assistance: Mapped[str | None] = mapped_column(String(30), nullable=True)  # liste réservée à un type d'assistance
 
     items: Mapped[list["SelectionItem"]] = relationship(
         back_populates="selection", order_by="SelectionItem.rang", cascade="all, delete-orphan")
@@ -134,8 +141,21 @@ def init_db(url: str | None = None):
         kwargs["pool_pre_ping"] = True
     _engine = create_engine(url, **kwargs)
     Base.metadata.create_all(_engine)
+    ajouter_colonnes_manquantes(_engine)
     SessionLocal.configure(bind=_engine)
     return _engine
+
+
+# Colonnes ajoutées après la première mise en production : create_all ne modifie pas une table existante
+NOUVELLES_COLONNES = [("beneficiaires", "assistance", "JSON"), ("selections", "assistance", "VARCHAR(30)")]
+
+
+def ajouter_colonnes_manquantes(engine) -> None:
+    insp = inspect(engine)
+    with engine.begin() as con:
+        for table, colonne, type_sql in NOUVELLES_COLONNES:
+            if colonne not in {c["name"] for c in insp.get_columns(table)}:
+                con.execute(text(f"ALTER TABLE {table} ADD COLUMN {colonne} {type_sql}"))
 
 
 def get_session():

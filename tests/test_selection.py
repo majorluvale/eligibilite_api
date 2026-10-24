@@ -65,6 +65,16 @@ def test_selection_invalide(client, menages):
     assert client.post("/api/selections", headers=auth(), json={"nombre": 0}).status_code == 422
     assert client.post("/api/selections", headers=auth(), json={"nombre": 5, "repartition": "x"}).status_code == 422
     assert client.post("/api/selections", json={"nombre": 5}).status_code == 401
+    assert client.post("/api/selections", headers=auth(), json={"nombre": 5, "assistance": "x"}).status_code == 422
+
+
+def test_selection_par_type_assistance(client, menages):
+    detail = client.get(f"/api/beneficiaires/{menages[3]}", headers=auth()).json()
+    code = detail["assistance_ideale"]
+    sel = client.post("/api/selections", headers=auth(), json={"nombre": 10, "assistance": code}).json()
+    assert sel["assistance"] == code and sel["retenus"] >= 1
+    assert {m["assistance_ideale"] for m in sel["menages_retenus"]} == {code}
+    assert menages[3] in [m["id"] for m in sel["menages_retenus"]]
 
 
 def test_pages_et_export(client, menages):

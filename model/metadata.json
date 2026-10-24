@@ -1,5 +1,5 @@
 {
-  "version": "20261024001705",
+  "version": "20261024015727",
   "modele": "XGBoost",
   "parametres": {
     "n_estimators": 3000,
@@ -111,6 +111,210 @@
     "oublies_retrouves_par_le_modele": 0.9366,
     "retenus_a_tort": 873,
     "a_tort_ecartes_par_le_modele": 0.9656
+  },
+  "assistance": {
+    "classes": [
+      "abri_ame",
+      "eau_hygiene",
+      "education",
+      "moyens_existence",
+      "protection",
+      "sante_nutrition",
+      "vivres"
+    ],
+    "n_entrainement": 80000,
+    "parametres": {
+      "n_estimators": 1000,
+      "max_depth": 4,
+      "learning_rate": 0.05,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8
+    },
+    "variables": [
+      "statut_menage",
+      "duree_deplacement_mois",
+      "nombre_deplacements_12m",
+      "sexe_chef_menage",
+      "age_chef_menage",
+      "etat_civil_chef",
+      "instruction_chef",
+      "taille_menage",
+      "enfants_moins_5",
+      "enfants_5_17",
+      "personnes_60_plus",
+      "enfants_non_scolarises",
+      "femme_enceinte_allaitante",
+      "membre_handicap",
+      "membre_maladie_chronique",
+      "enfant_non_accompagne_heberge",
+      "type_logement",
+      "statut_occupation",
+      "nombre_pieces",
+      "articles_essentiels",
+      "possede_betail",
+      "acces_terre_cultivable",
+      "toit_etanche",
+      "source_eclairage",
+      "possede_telephone",
+      "source_eau",
+      "temps_collecte_eau_min",
+      "type_latrine",
+      "savon_disponible",
+      "enfant_malade_2_semaines",
+      "acces_soins",
+      "vaccination_enfants_a_jour",
+      "enfant_malnutrition_depiste",
+      "jours_cereales",
+      "jours_legumineuses",
+      "jours_lait",
+      "jours_viande_poisson",
+      "jours_legumes",
+      "jours_fruits",
+      "jours_huile",
+      "jours_sucre",
+      "stock_nourriture_jours",
+      "repas_par_jour",
+      "jours_sans_nourriture_7j",
+      "rcsi_aliments_moins_chers",
+      "rcsi_emprunt_nourriture",
+      "rcsi_reduction_portions",
+      "rcsi_adultes_pour_enfants",
+      "rcsi_moins_de_repas",
+      "lcs_emprunt_argent",
+      "lcs_vente_biens_menagers",
+      "lcs_consommation_semences",
+      "lcs_reduction_depenses_sante",
+      "lcs_retrait_enfants_ecole",
+      "lcs_vente_derniere_femelle",
+      "lcs_vente_maison_terre",
+      "lcs_mendicite",
+      "lcs_travail_enfants",
+      "source_revenu",
+      "membres_avec_revenu",
+      "perte_revenu_6_mois",
+      "revenu_30j_usd",
+      "part_depenses_alimentation_pct",
+      "dette_usd",
+      "epargne_disponible",
+      "incident_securite_3_mois",
+      "biens_perdus_crise",
+      "membre_disparu_detenu",
+      "documents_identite",
+      "restriction_mouvements",
+      "assistance_3_derniers_mois",
+      "type_assistance_recue",
+      "fcs",
+      "rcsi",
+      "revenu_par_personne",
+      "part_non_scolarises",
+      "dette_sur_revenu"
+    ],
+    "repartition": {
+      "abri_ame": 0.1979,
+      "eau_hygiene": 0.1806,
+      "education": 0.1211,
+      "moyens_existence": 0.1494,
+      "protection": 0.0951,
+      "sante_nutrition": 0.0901,
+      "vivres": 0.1657
+    },
+    "test": {
+      "accuracy": 0.97,
+      "f1_macro": 0.9708,
+      "rappel_macro": 0.9704,
+      "precision_macro": 0.9713
+    },
+    "test_eligibles": {
+      "accuracy": 0.9585,
+      "f1_macro": 0.955,
+      "rappel_macro": 0.9517,
+      "precision_macro": 0.9586
+    },
+    "f1_par_classe": {
+      "abri_ame": 0.9729,
+      "eau_hygiene": 0.9721,
+      "education": 0.9778,
+      "moyens_existence": 0.9632,
+      "protection": 0.9709,
+      "sante_nutrition": 0.9805,
+      "vivres": 0.9584
+    },
+    "dans_les_2_propositions": 0.9981,
+    "matrice_confusion": [
+      [
+        1924,
+        18,
+        2,
+        13,
+        1,
+        2,
+        19
+      ],
+      [
+        6,
+        1760,
+        5,
+        10,
+        5,
+        6,
+        14
+      ],
+      [
+        3,
+        5,
+        1190,
+        6,
+        1,
+        0,
+        6
+      ],
+      [
+        15,
+        9,
+        7,
+        1439,
+        5,
+        4,
+        15
+      ],
+      [
+        6,
+        5,
+        4,
+        7,
+        918,
+        1,
+        9
+      ],
+      [
+        6,
+        4,
+        0,
+        3,
+        3,
+        880,
+        6
+      ],
+      [
+        16,
+        14,
+        15,
+        16,
+        8,
+        0,
+        1589
+      ]
+    ],
+    "validation_croisee": {
+      "accuracy": {
+        "moyenne": 0.9662,
+        "min": 0.9649
+      },
+      "f1_macro": {
+        "moyenne": 0.9663,
+        "min": 0.9649
+      }
+    }
   },
   "priorite": {
     "methode": "log_odds"
