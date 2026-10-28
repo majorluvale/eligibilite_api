@@ -202,12 +202,14 @@ def test_dashboard_pages_and_csrf(client):
     assert client.get("/dashboard", headers=auth("agent", "mauvais")).status_code == 401
     page = client.get("/dashboard", headers=auth())
     assert page.status_code == 200 and "Amani Kahindo" in page.text
+    assert "Assistance idéale" not in page.text and 'href="/docs"' not in page.text  # liste sans assistance, pas d'onglet API
     ben_id = client.get("/api/beneficiaires", headers=auth()).json()[0]["id"]
     detail = client.get(f"/dashboard/beneficiaires/{ben_id}", headers=auth())
     assert detail.status_code == 200 and "Pourquoi le modèle" in detail.text and "Abri de fortune" in detail.text
-    assert "Par thème du questionnaire" in detail.text
+    assert "Par thème du questionnaire" in detail.text and "Type d'assistance idéale" in detail.text
     modele = client.get("/dashboard/modele", headers=auth())
-    assert modele.status_code == 200 and "Grille Excel" in modele.text
+    assert modele.status_code == 200 and "notebooks/ciblage_avec_ml.ipynb" in modele.text
+    assert "grille" not in modele.text.lower()
     url = f"/dashboard/beneficiaires/{ben_id}/revision"
     assert client.post(url, data={"decision": "approuve"}, headers=auth()).status_code == 403
     r = client.post(url, data={"decision": "approuve", "csrf": csrf_token("agent")}, headers=auth(),

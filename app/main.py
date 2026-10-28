@@ -49,6 +49,7 @@ templates = Jinja2Templates(directory=HERE / "templates")
 templates.env.globals["SHORT_LABELS"] = SHORT_LABELS
 templates.env.globals["libelle"] = libelle
 templates.env.globals["ASSISTANCES"] = ASSISTANCES
+templates.env.globals["NOTEBOOK_URL"] = "https://github.com/majorluvale/eligibilite_api/blob/main/notebooks/ciblage_avec_ml.ipynb"
 
 
 def fmt_pct(v):
@@ -56,6 +57,8 @@ def fmt_pct(v):
 
 
 templates.env.filters["pct"] = fmt_pct
+templates.env.filters["nombre"] = lambda v: f"{v:,}".replace(",", " ")  # 80 000
+templates.env.filters["date_version"] = lambda v: f"{v[6:8]}/{v[4:6]}/{v[:4]}" if len(str(v)) >= 8 else v  # 20261024… -> 24/10/2026
 
 
 # ----------------------------------------------------------------------------- API

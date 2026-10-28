@@ -33,7 +33,7 @@
       {% elif b.statut_revue == 'confirmee' %}Confirmée par <strong>{{ b.reviewed_by }}</strong> le {{ b.reviewed_at.strftime('%d/%m/%Y %H:%M') }}.
       {% else %}Modifiée par <strong>{{ b.reviewed_by }}</strong> le {{ b.reviewed_at.strftime('%d/%m/%Y %H:%M') }} : l'humain a désapprouvé le modèle.{% endif %}
     </p>
-    <p class="muted small">Version du modèle : {{ b.model_version }}</p>
+    <p class="muted small">Modèle entraîné le {{ b.model_version|date_version }}</p>
   </div>
 </section>
 
@@ -41,15 +41,18 @@
 {% set a = b.assistance %}
 <section class="card">
   <h2>Type d'assistance idéale</h2>
-  <p class="small">{% if b.final_decision %}Assistance proposée pour ce ménage :{% else %}Besoin principal du ménage (non éligible : à orienter vers un partenaire du secteur) :{% endif %}</p>
-  <p><span class="pill big yes">{{ a.libelle }}</span> <span class="muted small">probabilité {{ a.probabilite|pct }}</span></p>
-  {% if a.alternatives %}
-  <p class="small">Autres besoins possibles :
-    {% for alt in a.alternatives %}{{ alt.libelle }} ({{ alt.probabilite|pct }}){% if not loop.last %} · {% endif %}{% endfor %}</p>
-  {% endif %}
+  <p class="small muted">{% if b.final_decision %}Assistance proposée pour ce ménage, puis les autres besoins possibles.{% else %}Ménage non éligible : besoin principal, utile pour l'orienter vers un partenaire du secteur.{% endif %}</p>
+  <div class="assist">
+    <div class="arow main"><span>{{ a.libelle }}</span><div class="abar"><div style="width: {{ (a.probabilite * 100)|round(1) }}%"></div></div><span class="num">{{ a.probabilite|pct }}</span></div>
+    {% for alt in a.alternatives %}
+    <div class="arow"><span>{{ alt.libelle }}</span><div class="abar"><div style="width: {{ (alt.probabilite * 100)|round(1) }}%"></div></div><span class="num">{{ alt.probabilite|pct }}</span></div>
+    {% endfor %}
+  </div>
   {% if a.facteurs %}
-  <p class="small">Réponses qui orientent vers ce type d'assistance :
-    {% for f in a.facteurs %}{{ f.label }} = {{ f.value }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+  <h3>Réponses qui orientent vers ce type d'assistance</h3>
+  <ul class="factors">
+    {% for f in a.facteurs %}<li>{{ f.label }} : {{ f.value }}</li>{% endfor %}
+  </ul>
   {% endif %}
   <p class="muted small">Proposition du second modèle, entraîné sur le besoin principal relevé par le comité de ciblage. Le superviseur garde la décision.</p>
 </section>

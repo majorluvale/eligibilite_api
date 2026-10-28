@@ -2,33 +2,45 @@
 {% block title %}Modèle — Ciblage{% endblock %}
 {% block content %}
 {% set t = m.test %}
-{% set noms = {'regression_logistique': 'Régression logistique', 'grille_excel': "Grille Excel de l'agent (seuil 40 points)", 'xgboost': 'XGBoost (déployé)'} %}
+{% set noms = {'regression_logistique': 'Régression logistique', 'xgboost': 'XGBoost (déployé)'} %}
 <div class="page-head">
   <div>
-    <h1>Le modèle</h1>
-    <p class="muted">{{ m.modele }} · version {{ m.version }} · entraîné sur {{ m.n_entrainement }} ménages
-      ({{ m.taux_eligibles_entrainement|pct }} d'éligibles) · {{ m.n_variables }} variables de l'enquête ménage</p>
+    <h1>Les modèles</h1>
+    <p class="muted">Entraînés le {{ m.version|date_version }} · {{ m.n_entrainement|nombre }} ménages d'entraînement · {{ m.n_variables }} variables de l'enquête ménage</p>
   </div>
+  <div class="actions"><a class="btn" href="{{ NOTEBOOK_URL }}" target="_blank" rel="noopener">Voir le notebook d'analyse ↗</a></div>
 </div>
+
+<section class="card highlight card-link">
+  <div>
+    <h2>Deux modèles XGBoost, une seule enquête</h2>
+    <p class="small">À partir des réponses du formulaire Kobo, le premier modèle décide si le ménage est <strong>éligible</strong> ;
+      le second propose le <strong>type d'assistance</strong> qui répond à son besoin principal. Les deux ont appris les décisions
+      de la vérification approfondie (visite à domicile et comité de ciblage).</p>
+  </div>
+</section>
+
+<h2 class="section-title">1. Éligibilité <span class="tag">classification binaire</span></h2>
 
 <section class="kpis">
   <div class="kpi"><span>Accuracy (test)</span><strong>{{ t.accuracy|pct }}</strong></div>
   <div class="kpi"><span>F1 score</span><strong>{{ t.f1|pct }}</strong></div>
-  <div class="kpi"><span>Rappel (éligibles retrouvés)</span><strong>{{ t.rappel|pct }}</strong></div>
-  <div class="kpi"><span>Précision</span><strong>{{ t.precision|pct }}</strong></div>
+  <div class="kpi"><span>Rappel</span><strong>{{ t.rappel|pct }}</strong><small>éligibles retrouvés</small></div>
+  <div class="kpi"><span>Précision</span><strong>{{ t.precision|pct }}</strong><small>éligibles à raison</small></div>
   {% if m.validation_croisee %}
-  <div class="kpi"><span>Pire F1 en validation croisée</span><strong>{{ m.validation_croisee.f1.min|pct }}</strong><small>sur 5 parties</small></div>
+  <div class="kpi"><span>Pire F1, validation croisée</span><strong>{{ m.validation_croisee.f1.min|pct }}</strong><small>sur 5 parties</small></div>
   {% endif %}
 </section>
 
 <section class="two-col">
   <div class="card">
     <h2>Comment le modèle décide</h2>
-    <p class="small">Le modèle a appris les décisions de la <strong>vérification approfondie</strong> (visite à domicile et comité de ciblage)
-      à partir des seules réponses de l'enquête ménage. La grille Excel, son score et son seuil ne lui ont <strong>pas</strong> été donnés :
-      il ne recopie pas la grille, il cherche lui-même les relations entre les {{ m.n_variables }} réponses.</p>
-    <p class="small">Ménage éligible si la probabilité atteint {{ m.seuil|pct }}. Chaque décision est expliquée réponse par réponse
-      (contributions SHAP) et reste revue par un superviseur.</p>
+    <ol class="steps small">
+      <li>Il lit les {{ m.n_variables }} réponses du ménage et cherche lui-même les relations entre elles
+        (alimentation, stratégies d'adaptation, revenu, logement, protection…).</li>
+      <li>Le ménage est éligible si la probabilité atteint {{ m.seuil|pct }}.</li>
+      <li>Chaque décision est expliquée réponse par réponse (valeurs SHAP) et reste revue par un superviseur.</li>
+    </ol>
     {% if m.zone_grise %}
     <p class="small"><strong>Zone grise</strong> (probabilité entre {{ m.zone_grise.probabilite[0]|pct }} et {{ m.zone_grise.probabilite[1]|pct }}) :
       {{ m.zone_grise.part_menages|pct }} des ménages, mais {{ m.zone_grise.part_erreurs|pct }} des erreurs. Ces ménages sont signalés pour être revus en priorité.</p>
@@ -36,81 +48,34 @@
   </div>
   <div class="card">
     <h2>Matrice de confusion (test)</h2>
-    <table class="confusion">
-      <tr><th></th><th>Prédit non éligible</th><th>Prédit éligible</th></tr>
-      <tr><th>Vérification : non éligible</th><td class="good">{{ t.matrice_confusion.vn }}</td><td class="bad">{{ t.matrice_confusion.fp }}<small>inclusions à tort</small></td></tr>
-      <tr><th>Vérification : éligible</th><td class="bad">{{ t.matrice_confusion.fn }}<small>exclusions à tort</small></td><td class="good">{{ t.matrice_confusion.vp }}</td></tr>
-    </table>
+    <div class="confusion-wrap">
+      <table class="confusion">
+        <tr><th></th><th>Prédit non éligible</th><th>Prédit éligible</th></tr>
+        <tr><th>Non éligible</th><td class="good">{{ t.matrice_confusion.vn }}</td><td class="bad">{{ t.matrice_confusion.fp }}<small>inclusions à tort</small></td></tr>
+        <tr><th>Éligible</th><td class="bad">{{ t.matrice_confusion.fn }}<small>exclusions à tort</small></td><td class="good">{{ t.matrice_confusion.vp }}</td></tr>
+      </table>
+    </div>
   </div>
 </section>
 
 <section class="two-col">
   <div class="card">
-    <h2>Comparaison (validation, mêmes ménages)</h2>
-    <table class="list compact">
-      <thead><tr><th>Méthode</th><th class="num">Accuracy</th><th class="num">Précision</th><th class="num">Rappel</th><th class="num">F1</th></tr></thead>
+    <h2>Modèles comparés (validation)</h2>
+    <div class="scroll-x"><table class="list compact">
+      <thead><tr><th>Modèle</th><th class="num">Accuracy</th><th class="num">Précision</th><th class="num">Rappel</th><th class="num">F1</th></tr></thead>
       <tbody>
-      {% for r in m.validation_comparaison %}
-        <tr class="{{ 'chosen' if r.modele == 'xgboost' }}"><td>{{ noms.get(r.modele, r.modele) }}</td>
+      {% for r in m.validation_comparaison if r.modele in noms %}
+        <tr class="{{ 'chosen' if r.modele == 'xgboost' }}"><td>{{ noms[r.modele] }}</td>
           <td class="num">{{ r.accuracy|pct }}</td><td class="num">{{ r.precision|pct }}</td><td class="num">{{ r.rappel|pct }}</td><td class="num">{{ r.f1|pct }}</td></tr>
       {% endfor %}
       </tbody>
-    </table>
-    <p class="small muted">La grille additionne des points sur une quinzaine de questions. Elle suffit dans un scénario simple ; avec
-      {{ m.n_variables }} variables, elle ne voit pas les combinaisons de réponses que le modèle apprend.</p>
-  </div>
-  {% if m.grille_excel_test %}
-  {% set g = m.grille_excel_test %}
-  <div class="card">
-    <h2>Ce que la grille Excel ne voit pas (test)</h2>
-    <table class="list compact">
-      <tbody>
-        <tr><td>Ménages éligibles oubliés par la grille</td><td class="num">{{ g.eligibles_oublies }}</td></tr>
-        <tr><td>… dont retrouvés par le modèle</td><td class="num"><strong>{{ g.oublies_retrouves_par_le_modele|pct }}</strong></td></tr>
-        <tr><td>Ménages non éligibles retenus par la grille</td><td class="num">{{ g.retenus_a_tort }}</td></tr>
-        <tr><td>… dont écartés par le modèle</td><td class="num"><strong>{{ g.a_tort_ecartes_par_le_modele|pct }}</strong></td></tr>
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
-</section>
-
-{% if m.assistance %}
-{% set a = m.assistance %}
-<section class="two-col">
-  <div class="card">
-    <h2>Second modèle : type d'assistance idéale</h2>
-    <p class="small">À partir des mêmes réponses (et des indicateurs FCS, rCSI, revenu par personne… calculés sur ces réponses),
-      un second XGBoost propose le type d'assistance qui répond au besoin principal du ménage, parmi {{ a.classes|length }} types.
-      Il a appris le besoin principal relevé par le comité sur {{ a.n_entrainement }} ménages.</p>
-    <table class="list compact">
-      <tbody>
-        <tr><td>Accuracy (test)</td><td class="num"><strong>{{ a.test.accuracy|pct }}</strong></td></tr>
-        <tr><td>F1 score moyen des types (macro)</td><td class="num"><strong>{{ a.test.f1_macro|pct }}</strong></td></tr>
-        <tr><td>Accuracy sur les ménages éligibles</td><td class="num">{{ a.test_eligibles.accuracy|pct }}</td></tr>
-        <tr><td>Besoin du comité parmi les 2 propositions du modèle</td><td class="num">{{ a.dans_les_2_propositions|pct }}</td></tr>
-        {% if a.validation_croisee %}<tr><td>Pire accuracy en validation croisée (5 parties)</td><td class="num">{{ a.validation_croisee.accuracy.min|pct }}</td></tr>{% endif %}
-      </tbody>
-    </table>
+    </table></div>
+    <p class="small muted">Sept modèles sont comparés dans le notebook (KNN, régression logistique, SVM, arbre de décision,
+      Random Forest, Gradient Boosting, XGBoost). XGBoost est le plus performant.</p>
   </div>
   <div class="card">
-    <h2>Score par type d'assistance (test)</h2>
-    <table class="list compact">
-      <thead><tr><th>Type d'assistance</th><th class="num">Part des ménages</th><th class="num">F1</th></tr></thead>
-      <tbody>
-      {% for code in a.classes %}
-        <tr><td>{{ ASSISTANCES[code] }}</td><td class="num">{{ a.repartition[code]|pct }}</td><td class="num">{{ a.f1_par_classe[code]|pct }}</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% endif %}
-
-<section class="two-col">
-  <div class="card">
-    <h2>Éligibilité : importance par thème</h2>
-    <p class="muted small">Effet moyen (en valeur absolue, log-odds) des réponses de chaque thème sur la décision, mesuré sur le jeu de test.</p>
+    <h2>Importance par thème</h2>
+    <p class="muted small">Effet moyen des réponses de chaque thème sur la décision (valeurs SHAP, jeu de test).</p>
     <div class="imp">
       {% for r in m.importance_themes %}
       <div class="irow">
@@ -121,17 +86,65 @@
       {% endfor %}
     </div>
   </div>
-  <div class="card">
-    <h2>Éligibilité : les 20 questions les plus importantes</h2>
-    <div class="imp">
-      {% for r in importance %}
-      <div class="irow">
-        <span>{{ SHORT_LABELS[r.feature] }}</span>
-        <div class="ibar"><div style="width: {{ (r.importance / max_imp * 100)|round(1) }}%"></div></div>
-        <span class="num">{{ '%.2f'|format(r.importance) }}</span>
-      </div>
-      {% endfor %}
+</section>
+
+<section class="card">
+  <h2>Les 20 questions les plus importantes</h2>
+  <div class="imp">
+    {% for r in importance %}
+    <div class="irow">
+      <span>{{ SHORT_LABELS[r.feature] }}</span>
+      <div class="ibar"><div style="width: {{ (r.importance / max_imp * 100)|round(1) }}%"></div></div>
+      <span class="num">{{ '%.2f'|format(r.importance) }}</span>
     </div>
+    {% endfor %}
   </div>
+</section>
+
+{% if m.assistance %}
+{% set a = m.assistance %}
+<h2 class="section-title">2. Type d'assistance idéale <span class="tag">classification multi classe</span></h2>
+
+<section class="kpis">
+  <div class="kpi"><span>Accuracy (test)</span><strong>{{ a.test.accuracy|pct }}</strong></div>
+  <div class="kpi"><span>F1 score (macro)</span><strong>{{ a.test.f1_macro|pct }}</strong><small>moyenne des {{ a.classes|length }} types</small></div>
+  <div class="kpi"><span>Accuracy, ménages éligibles</span><strong>{{ a.test_eligibles.accuracy|pct }}</strong></div>
+  <div class="kpi"><span>Parmi les 2 propositions</span><strong>{{ a.dans_les_2_propositions|pct }}</strong><small>besoin retenu par le comité</small></div>
+  {% if a.validation_croisee %}
+  <div class="kpi"><span>Pire accuracy, validation croisée</span><strong>{{ a.validation_croisee.accuracy.min|pct }}</strong><small>sur 5 parties</small></div>
+  {% endif %}
+</section>
+
+<section class="two-col">
+  <div class="card">
+    <h2>Comment le type d'assistance est proposé</h2>
+    <ol class="steps small">
+      <li>Le second modèle lit les mêmes réponses, plus cinq indicateurs calculés sur ces réponses
+        (score de consommation alimentaire, rCSI, revenu par personne, part des enfants non scolarisés, dette sur revenu).</li>
+      <li>Il donne une probabilité pour chacun des {{ a.classes|length }} types d'assistance.</li>
+      <li>La fiche du ménage affiche la proposition principale, les deux alternatives et les réponses qui l'expliquent.</li>
+    </ol>
+  </div>
+  <div class="card">
+    <h2>Score par type d'assistance (test)</h2>
+    <div class="scroll-x"><table class="list compact">
+      <thead><tr><th>Type d'assistance</th><th class="num">Ménages</th><th class="num">F1</th></tr></thead>
+      <tbody>
+      {% for code in a.classes %}
+        <tr><td>{{ ASSISTANCES[code] }}</td><td class="num">{{ a.repartition[code]|pct }}</td><td class="num">{{ a.f1_par_classe[code]|pct }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+</section>
+{% endif %}
+
+<section class="card card-link mt">
+  <div>
+    <h2>Méthode complète</h2>
+    <p class="small muted">Exploration des données, préparation, comparaison des modèles, validation croisée et valeurs SHAP :
+      tout est dans le notebook. Le modèle déployé est entraîné par <code>training/train.py</code>, avec la même préparation et les mêmes paramètres.</p>
+  </div>
+  <a class="btn ghost" href="{{ NOTEBOOK_URL }}" target="_blank" rel="noopener">Ouvrir le notebook ↗</a>
 </section>
 {% endblock %}

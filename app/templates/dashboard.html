@@ -52,7 +52,7 @@
   <thead>
     <tr>
       <th>Chef de ménage</th><th>Village</th><th>Localité</th><th>Reçu le</th>
-      <th class="num">Probabilité</th><th>Modèle</th><th>Assistance idéale</th><th>Décision finale</th><th>Revue</th>
+      <th class="num">Probabilité</th><th>Modèle</th><th>Décision finale</th><th>Revue</th>
     </tr>
   </thead>
   <tbody>
@@ -64,9 +64,7 @@
       <td>{{ b.zone or '—' }}</td>
       <td>{{ (b.submitted_at or b.received_at).strftime('%d/%m/%Y %H:%M') }}</td>
       <td class="num">{{ b.score|pct }}</td>
-      <td><span class="pill {{ 'yes' if b.model_decision else 'no' }}">{{ 'Éligible' if b.model_decision else 'Non éligible' }}</span></td>
-      <td class="small">{{ b.assistance.libelle if b.assistance else '—' }}</td>
-      <td><span class="pill {{ 'yes' if b.final_decision else 'no' }}">{{ 'Éligible' if b.final_decision else 'Non éligible' }}</span></td>
+      <td><span class="pill {{ 'yes' if b.model_decision else 'no' }}">{{ 'Éligible' if b.model_decision else 'Non éligible' }}</span></td>      <td><span class="pill {{ 'yes' if b.final_decision else 'no' }}">{{ 'Éligible' if b.final_decision else 'Non éligible' }}</span></td>
       <td>
         {% if b.statut_revue == 'en_attente' %}<span class="tag">en attente</span>
         {% elif b.statut_revue == 'confirmee' %}<span class="tag ok">confirmée</span>
@@ -74,7 +72,7 @@
       </td>
     </tr>
   {% else %}
-    <tr class="empty"><td colspan="9">Aucun ménage pour l'instant. Les soumissions Kobo apparaîtront ici dès réception.</td></tr>
+    <tr class="empty"><td colspan="8">Aucun ménage pour l'instant. Les soumissions Kobo apparaîtront ici dès réception.</td></tr>
   {% endfor %}
   </tbody>
 </table>
