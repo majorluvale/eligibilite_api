@@ -8,20 +8,17 @@
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="/dashboard"><span class="brand-mark">C</span><span>Ciblage des ménages<small>Éligibilité et type d'assistance</small></span></a>
+  <a class="brand" href="/dashboard">Ciblage<span>·</span>Éligibilité</a>
   <nav>
     {% set p = request.url.path %}
     <a href="/dashboard" class="{% if p.startswith('/dashboard') and not p.startswith('/dashboard/modele') and not p.startswith('/dashboard/selections') %}active{% endif %}">Bénéficiaires</a>
     <a href="/dashboard/selections" class="{% if p.startswith('/dashboard/selections') %}active{% endif %}">Sélection</a>
-    <a href="/dashboard/modele" class="{% if p.startswith('/dashboard/modele') %}active{% endif %}">Modèle</a>
+    <a href="/dashboard/modele" class="{% if request.url.path.startswith('/dashboard/modele') %}active{% endif %}">Modèle</a>
   </nav>
   <span class="user">{{ user }}</span>
 </header>
 <main class="wrap">
   {% block content %}{% endblock %}
 </main>
-<footer class="footer">
-  Projet de fin de formation · <a href="{{ NOTEBOOK_URL }}" target="_blank" rel="noopener">Notebook d'analyse (GitHub)</a>
-</footer>
 </body>
 </html>
