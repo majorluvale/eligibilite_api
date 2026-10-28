@@ -1,4 +1,4 @@
-"""Générateur de données v6 — enquête ménage complexe (72 variables) et vérification approfondie.
+"""Générateur des données simulées — enquête ménage complexe (72 variables) et vérification approfondie.
 
 Processus simulé :
 1. Les enquêteurs collectent l'enquête ménage avec Kobo (questions de app/schema.py) :
@@ -33,7 +33,6 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.schema import FEATURES  # noqa: E402
 
-import generateur_ciblage_v5 as grille_v5  # même grille Excel que la v5, utilisée ici comme point de comparaison
 
 N_MENAGES = 100_000
 GRAINE = 2026
@@ -189,7 +188,7 @@ def generer(n: int = N_MENAGES, graine: int = GRAINE) -> pd.DataFrame:
     d["vaccination_enfants_a_jour"] = np.where(u5, oui(rng, 0.85 - 0.40 * v - 0.15 * deplace), "pas_enfant")
     d["enfant_malnutrition_depiste"] = oui(rng, (0.02 + 0.25 * f ** 2 + 0.05 * (d["enfant_malade_2_semaines"] == "oui")) * u5)
 
-    d["score_grille_excel"], _, d["decision_grille_excel"] = grille_v5.feuille_excel(d)
+    d["score_grille_excel"], d["decision_grille_excel"] = feuille_excel(d)
     d["besoin"] = besoin_verifie(d) + rng.normal(0, BRUIT_COMITE, n)
     d["eligible"] = (d["besoin"] >= d["besoin"].quantile(1 - PART_ELIGIBLES)).astype(int)
     d["assistance_ideale"] = assistance_ideale(d, rng)
@@ -292,6 +291,45 @@ def assistance_ideale(d: pd.DataFrame, rng) -> pd.Series:
     s = besoins_par_secteur(d)
     s = s + rng.normal(0, BRUIT_SECTEURS, s.shape)
     return s.idxmax(axis=1)
+
+
+# ---------------------------------------------------------------- grille Excel de l'agent (comparaison seulement)
+SEUIL_GRILLE = 40
+
+
+def points(d: pd.DataFrame) -> pd.DataFrame:
+    """Points de la grille Excel de l'ONG, critère par critère (une quinzaine de questions)."""
+    duree = d["duree_deplacement_mois"].fillna(99)
+    p = pd.DataFrame(index=d.index)
+    p["statut_menage"] = np.select(
+        [(d["statut_menage"] == "deplace") & (duree < 3), d["statut_menage"] == "deplace",
+         d["statut_menage"] == "retourne", d["statut_menage"] == "famille_accueil"], [15, 10, 8, 5], 0)
+    p["chef_menage"] = (6 * (d["sexe_chef_menage"] == "femme") + 12 * (d["age_chef_menage"] < 18)
+                        + 8 * (d["age_chef_menage"] >= 60))
+    p["taille_menage"] = np.select([d["taille_menage"] >= 10, d["taille_menage"] >= 7, d["taille_menage"] >= 4], [10, 7, 4], 0)
+    p["enfants_moins_5"] = np.minimum(2 * d["enfants_moins_5"], 6)
+    p["membre_handicap"] = 8 * (d["membre_handicap"] == "oui")
+    p["membre_maladie_chronique"] = 5 * (d["membre_maladie_chronique"] == "oui")
+    p["femme_enceinte_allaitante"] = 5 * (d["femme_enceinte_allaitante"] == "oui")
+    p["enfant_non_accompagne_heberge"] = 8 * (d["enfant_non_accompagne_heberge"] == "oui")
+    p["type_logement"] = d["type_logement"].map({"sans_abri": 15, "abri_fortune": 10, "heberge_famille": 6,
+                                                 "maison_endommagee": 4, "maison_correcte": 0})
+    p["articles_essentiels"] = np.select([d["articles_essentiels"] <= 1, d["articles_essentiels"] <= 3], [8, 4], 0)
+    p["repas_par_jour"] = d["repas_par_jour"].map({1: 12, 2: 5, 3: 0})
+    p["jours_sans_nourriture_7j"] = np.select([d["jours_sans_nourriture_7j"] >= 3, d["jours_sans_nourriture_7j"] >= 1], [8, 4], 0)
+    p["source_revenu"] = d["source_revenu"].map({"aucun_revenu": 12, "travail_journalier": 6, "agriculture": 3,
+                                                 "petit_commerce": 3, "salaire_regulier": 0})
+    p["possede_betail"] = -5 * (d["possede_betail"] == "oui")
+    return p.astype(int)
+
+
+def feuille_excel(d: pd.DataFrame):
+    """Score et décision de l'agent avec la grille : seuil de 40 points, inclusions automatiques, exclusions."""
+    score = points(d).sum(axis=1)
+    inclusion = (d["age_chef_menage"] < 18) | ((d["enfant_non_accompagne_heberge"] == "oui")
+                                                & ((d["sexe_chef_menage"] == "femme") | (d["age_chef_menage"] >= 60)))
+    exclusion = (d["source_revenu"] == "salaire_regulier") | d["type_assistance_recue"].isin(["vivres", "cash"])
+    return score, (~exclusion & (inclusion | (score >= SEUIL_GRILLE))).astype(int)
 
 
 def construire_base(d: pd.DataFrame, chemin_db: Path, chemin_csv: Path) -> None:

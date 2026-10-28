@@ -2,10 +2,10 @@
 
 Deux modèles XGBoost, entraînés à partir des réponses de l'enquête ménage :
 1. **éligibilité** (binaire) : décision de la vérification approfondie
-   (voir notebooks/ciblage_avec_ml_v6.ipynb) ;
+   (voir notebooks/ciblage_avec_ml.ipynb, partie 1) ;
 2. **type d'assistance idéale** (7 classes) : besoin principal relevé par le comité, avec en plus
    les indicateurs standard calculés sur les réponses (app/indicateurs.py ;
-   voir notebooks/assistance_ideale_v6.ipynb).
+   voir la partie 2 du même notebook).
 La grille Excel de l'ONG, son score et son seuil ne sont donnés à aucun des deux modèles.
 
 Préparation identique au notebook : questions conditionnelles non posées -> -1 (nombres) ou

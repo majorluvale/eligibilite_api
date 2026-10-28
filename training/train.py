@@ -1,7 +1,7 @@
-"""Entraînement reproductible des modèles déployés (données v6 : enquête ménage, vérification approfondie).
+"""Entraînement reproductible des modèles déployés (enquête ménage, vérification approfondie).
 
 Usage :
-    python -m training.train                       # données v6 (générées si absentes)
+    python -m training.train                       # données simulées (générées si absentes)
     python -m training.train --data mes_menages.csv
 
 Le fichier doit contenir les questions de app/schema.py et la décision de la vérification
@@ -11,12 +11,12 @@ La grille Excel de l'ONG n'est utilisée par aucun des deux modèles :
 si les colonnes `decision_grille_excel` / `score_grille_excel` sont présentes, elles servent
 seulement de point de comparaison.
 
-Même préparation et mêmes paramètres que notebooks/ciblage_avec_ml_v6.ipynb :
+Même préparation et mêmes paramètres que notebooks/ciblage_avec_ml.ipynb (partie 1) :
 - questions conditionnelles non posées -> -1 (nombres) ou "non_applicable" (choix) ;
 - choix codés comme le LabelEncoder (ordre alphabétique) ;
 - découpage 80 % entraînement / 10 % validation / 10 % test, stratifié, random_state=42 ;
 - XGBoost avec les paramètres trouvés par GridSearchCV dans le notebook, seuil 0,5.
-Modèle du type d'assistance : comme notebooks/assistance_ideale_v6.ipynb (réponses + indicateurs
+Modèle du type d'assistance : comme la partie 2 du notebook (réponses + indicateurs
 standard de app/indicateurs.py, découpage stratifié sur le type d'assistance).
 Pas de normalisation : elle ne change rien pour un modèle à base d'arbres.
 """
@@ -45,7 +45,7 @@ sys.path.insert(0, str(ROOT / "notebooks"))
 from app.ml import VARIABLES_ASSISTANCE, EligibilityModel, encoder, encoder_assistance, prepare  # noqa: E402
 from app.schema import ASSISTANCES, CATEGORICAL, FEATURE_NAMES, FEATURES_BY_NAME, THEMES  # noqa: E402
 
-DONNEES_V6 = ROOT / "notebooks" / "data" / "ciblage_v6.csv"
+DONNEES = ROOT / "notebooks" / "data" / "ciblage.csv"
 SEED = 42
 SEUIL = 0.5
 ZONE_GRISE = (0.2, 0.8)
@@ -56,9 +56,9 @@ XGB_ASSISTANCE = dict(n_estimators=1000, max_depth=4, learning_rate=0.05, subsam
 
 
 def charger(chemin: Path) -> pd.DataFrame:
-    if not chemin.exists() and chemin == DONNEES_V6:
-        import generateur_ciblage_v6 as gen
-        print(f"{chemin} absent : génération des données v6…")
+    if not chemin.exists() and chemin == DONNEES:
+        import generateur_donnees as gen
+        print(f"{chemin} absent : génération des données…")
         gen.construire_base(gen.generer(), chemin.with_suffix(".db"), chemin)
     return pd.read_csv(chemin, encoding="utf-8-sig", keep_default_na=False, na_values=[""])
 
@@ -117,7 +117,7 @@ def entrainer_assistance(df, X_brut, encodeurs, eligible, cv=True):
 
 def main(argv=None) -> dict:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", type=Path, default=DONNEES_V6)
+    ap.add_argument("--data", type=Path, default=DONNEES)
     ap.add_argument("--out", type=Path, default=ROOT / "model")
     ap.add_argument("--sans-cv", action="store_true", help="ne pas faire la validation croisée (plus rapide)")
     args = ap.parse_args(argv)

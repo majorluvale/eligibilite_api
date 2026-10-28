@@ -1,7 +1,7 @@
 """Indicateurs standard calculés à partir des réponses du ménage (modèle du type d'assistance).
 
 Ce ne sont pas des données externes : chaque indicateur est un calcul classique de
-l'humanitaire fait sur les réponses de l'enquête, comme dans notebooks/assistance_ideale_v6.ipynb.
+l'humanitaire fait sur les réponses de l'enquête, comme dans notebooks/ciblage_avec_ml.ipynb (partie 2).
 """
 from __future__ import annotations
 

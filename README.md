@@ -27,7 +27,7 @@ KoboCollect ──soumission──▶ KoboToolbox ──REST Service (JSON)─�
 
 - Dans un scénario simple (une dizaine de questions oui/non), la grille Excel fait le travail.
 - Avec plus de 70 variables, une grille de points additionnés ne peut pas tout combiner, et l'humain peut se tromper. Le modèle cherche lui-même les relations entre les réponses : par exemple, un même revenu ne pèse pas pareil dans un ménage de 3 personnes et dans un ménage de 10 personnes sans réserves de nourriture.
-- Le modèle ne reproduit pas la grille : entraîné à la recopier (version 5), il obtenait des scores très hauts, mais il n'apportait rien de plus qu'Excel. Cette approche a été abandonnée.
+- Le modèle ne reproduit pas la grille : entraîné à la recopier (version précédente), il obtenait des scores très hauts, mais il n'apportait rien de plus qu'Excel. Cette approche a été abandonnée.
 - Le modèle aide à décider à grande échelle, il ne remplace pas la décision : chaque décision reste revue par un superviseur dans le dashboard.
 
 ## Contenu
@@ -38,13 +38,15 @@ KoboCollect ──soumission──▶ KoboToolbox ──REST Service (JSON)─�
 | `app/ml.py` | Modèles XGBoost (éligibilité, type d'assistance), prédiction et explication SHAP |
 | `app/indicateurs.py` | Indicateurs standard calculés sur les réponses (FCS, rCSI, revenu par personne…) pour le modèle du type d'assistance |
 | `app/main.py` | Routes API + dashboard |
-| `training/train.py` | Entraînement reproductible (même préparation et mêmes paramètres que le notebook v6) |
+| `training/train.py` | Entraînement reproductible des deux modèles (même préparation et mêmes paramètres que le notebook) |
 | `model/` | Modèle déployé (`model.joblib`) et métriques (`metadata.json`) |
 | `kobo/build_xlsform.py` | Génère le formulaire Kobo depuis `schema.py` (un groupe par thème) |
 | `kobo/formulaire_ciblage_menages.xlsx` | **Formulaire à importer dans KoboToolbox** |
 | `scripts/simulate_kobo.py` | Envoie des ménages simulés au webhook (démo) |
 | `tests/` | Tests de l'API, du webhook, de la revue, de la sélection et de la cohérence formulaire ↔ modèle |
-| `notebooks/` | Analyses v3 à v6 ; **v6 = modèle déployé** (voir `notebooks/README.md`) |
+| `notebooks/ciblage_avec_ml.ipynb` | **Le notebook** : exploration, 7 modèles comparés, validation croisée, SHAP, comparaison avec la grille Excel (partie 1 : éligibilité ; partie 2 : type d'assistance idéale). Les données sont créées au premier lancement. |
+| `notebooks/modeles/` | Créé à l'exécution du notebook : fichiers joblib exportés (`uniques`, `encoders`, `scaler`, `xgb_model`, et leurs équivalents `_assistance`) |
+| `notebooks/generateur_donnees.py` | Simulation des données : enquête ménage, grille Excel de l'agent, décision de la vérification et besoin principal |
 
 ## Sélection sous contrainte budgétaire
 
@@ -66,7 +68,7 @@ Quand il y a plus de ménages éligibles que le budget n'en permet (par exemple 
 
 ## Le modèle
 
-Analyse complète : `notebooks/ciblage_avec_ml_v6.ipynb`. Sept modèles y sont comparés (KNN, régression logistique, SVM, arbre de décision, Random Forest, Gradient Boosting, XGBoost), et **XGBoost est le plus performant**.
+Analyse complète : `notebooks/ciblage_avec_ml.ipynb`, partie 1. Sept modèles y sont comparés (KNN, régression logistique, SVM, arbre de décision, Random Forest, Gradient Boosting, XGBoost), et **XGBoost est le plus performant**.
 
 - **Données** : 100 000 ménages simulés, 72 variables de l'enquête ménage (profil, composition, logement, eau et hygiène, santé, consommation alimentaire, stratégies d'adaptation, moyens d'existence, protection, assistance). Pas de GPS ni de données externes.
 - **Cible** : décision de la vérification approfondie (30 % d'éligibles).
@@ -92,7 +94,7 @@ Les données sont simulées : sur de vraies décisions de vérification, qui con
 
 ## Le type d'assistance idéale (second modèle)
 
-Analyse complète : `notebooks/assistance_ideale_v6.ipynb` (classification multi classe, comme prévu dans le mémoire).
+Analyse complète : `notebooks/ciblage_avec_ml.ipynb`, partie 2 (classification multi classe, comme prévu dans le mémoire).
 
 - **Cible** : le besoin principal relevé par le comité de ciblage pour chaque ménage visité (colonne `assistance_ideale`), parmi 7 types : vivres / cash alimentaire, moyens d'existence, abri et articles ménagers essentiels, éducation, santé et nutrition, eau, hygiène et assainissement, protection.
 - **Variables** : les mêmes 72 réponses, plus 5 indicateurs standard calculés sur ces réponses (`app/indicateurs.py`) : score de consommation alimentaire (FCS), indice réduit des stratégies d'adaptation (rCSI), revenu par personne, part des enfants non scolarisés, dette rapportée au revenu. Pas de grille, pas de données externes.
@@ -110,10 +112,10 @@ Analyse complète : `notebooks/assistance_ideale_v6.ipynb` (classification multi
 - Pour un ménage éligible, c'est l'assistance proposée. Pour un ménage non éligible, c'est son besoin principal, utile pour l'orienter vers un partenaire.
 - La page **Sélection** peut réserver une liste à un type d'assistance (par exemple une distribution de kits scolaires : seuls les éligibles dont le besoin principal est l'éducation sont classés).
 
-Ré-entraîner les deux modèles (les données v6 sont générées automatiquement si elles sont absentes) :
+Ré-entraîner les deux modèles (les données sont générées automatiquement si elles sont absentes) :
 
 ```bash
-python -m training.train                          # données v6, avec validation croisée (quelques minutes)
+python -m training.train                          # données simulées, avec validation croisée (quelques minutes)
 python -m training.train --data mes_menages.csv   # vos propres données : questions de schema.py + eligible (0/1)
                                                   # + assistance_ideale (facultatif : codes de schema.ASSISTANCES)
 ```
